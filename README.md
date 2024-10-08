@@ -60,8 +60,8 @@ echo 0 > /proc/sys/kernel/randomize_va_space
 
 # Install the DPDK driver (igb_uio) for Intel NICs (Not needed for Mellanox NICs)
 modprobe uio
-insmod /data/f-stack/dpdk/build/kernel/linux/igb_uio/igb_uio.ko
-insmod /data/f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on # carrier=on is necessary, otherwise need to be up `veth0` via `echo 1 > /sys/class/net/veth0/carrier`
+insmod f-stack/dpdk/build/kernel/linux/igb_uio/igb_uio.ko
+insmod f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on # carrier=on is necessary, otherwise need to be up `veth0` via `echo 1 > /sys/class/net/veth0/carrier`
 
 # Bind NICs to DPDK
 python dpdk-devbind.py --status
@@ -80,7 +80,7 @@ sudo make install
 ```bash
 cd ~/palladium-ingress/
 bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
-make
+make -j
 sudo make install
 ```
 
