@@ -29,6 +29,10 @@ static void ngx_cache_loader_process_handler(ngx_event_t *ev);
 
 #if (NGX_HAVE_FSTACK)
 extern int ff_mod_init(const char *conf, int proc_id, int proc_type);
+static void rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data);
+extern void rdma_run(loop_func_t loop, void *arg);
+extern int rdma_mod_init(const char *conf, int proc_id);
+static void rdma_worker_process_init(ngx_cycle_t *cycle, ngx_int_t worker);
 ngx_int_t     ngx_ff_process;
 #endif
 
@@ -511,6 +515,15 @@ ngx_start_worker_processes(ngx_cycle_t *cycle, ngx_int_t n, ngx_int_t type)
 #endif
 
     }
+
+#if (NGX_HAVE_FSTACK)
+    i = n;
+    // ngx_msleep(5000);
+    printf("\n\n##### Starting RDMA worker (%ld) #####\n", i);
+    ngx_spawn_rdma_process(cycle, rdma_worker_process_cycle,
+                        (void *) (intptr_t) i, "rdma process", type);
+#endif
+
 }
 
 
@@ -1190,6 +1203,240 @@ ngx_worker_process_init(ngx_cycle_t *cycle, ngx_int_t worker)
     }
 }
 
+#if (NGX_HAVE_FSTACK)
+static int
+rdma_worker_process_cycle_loop(void *arg)
+{
+    ngx_cycle_t *cycle = (ngx_cycle_t *)arg;
+
+    if (ngx_exiting) {
+        if (ngx_event_no_timers_left() == NGX_OK) {
+            ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "exiting");
+            ngx_worker_process_exit(cycle);
+        }
+    }
+
+    //ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0, "worker cycle");
+
+    // rdma_process_events_and_timers(cycle);
+
+    printf("##### Run rdma_worker process_cycle_loop #####\n");
+    ngx_msleep(1000);
+
+    if (ngx_terminate) {
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "exiting");
+        ngx_worker_process_exit(cycle);
+    }
+
+    if (ngx_quit) {
+        ngx_quit = 0;
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+                      "gracefully shutting down");
+        ngx_setproctitle("worker process is shutting down");
+
+        if (!ngx_exiting) {
+            ngx_exiting = 1;
+            ngx_close_listening_sockets(cycle);
+            ngx_close_idle_connections(cycle);
+        }
+    }
+
+    if (ngx_reopen) {
+        ngx_reopen = 0;
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "reopening logs");
+        ngx_reopen_files(cycle, -1);
+    }
+
+    return 0;
+}
+
+static void
+rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
+{
+    ngx_int_t worker = (intptr_t) data;
+
+    ngx_process = NGX_PROCESS_WORKER;
+    ngx_worker = worker;
+
+    rdma_worker_process_init(cycle, worker);
+
+    ngx_setproctitle("rdma process");
+
+    rdma_run(rdma_worker_process_cycle_loop, (void *)cycle);
+}
+
+static void
+rdma_worker_process_init(ngx_cycle_t *cycle, ngx_int_t worker)
+{
+    sigset_t          set;
+    ngx_int_t         n;
+    ngx_time_t       *tp;
+    ngx_cpuset_t     *cpu_affinity;
+    struct rlimit     rlmt;
+    ngx_core_conf_t  *ccf;
+
+    if (ngx_set_environment(cycle, NULL) == NULL) {
+        /* fatal */
+        exit(2);
+    }
+
+    ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
+
+    if (worker >= 0 && ccf->priority != 0) {
+        if (setpriority(PRIO_PROCESS, 0, ccf->priority) == -1) {
+            ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
+                          "setpriority(%d) failed", ccf->priority);
+        }
+    }
+
+    if (ccf->rlimit_nofile != NGX_CONF_UNSET) {
+        rlmt.rlim_cur = (rlim_t) ccf->rlimit_nofile;
+        rlmt.rlim_max = (rlim_t) ccf->rlimit_nofile;
+
+        if (setrlimit(RLIMIT_NOFILE, &rlmt) == -1) {
+            ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
+                          "setrlimit(RLIMIT_NOFILE, %i) failed",
+                          ccf->rlimit_nofile);
+        }
+    }
+
+    if (ccf->rlimit_core != NGX_CONF_UNSET) {
+        rlmt.rlim_cur = (rlim_t) ccf->rlimit_core;
+        rlmt.rlim_max = (rlim_t) ccf->rlimit_core;
+
+        if (setrlimit(RLIMIT_CORE, &rlmt) == -1) {
+            ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
+                          "setrlimit(RLIMIT_CORE, %O) failed",
+                          ccf->rlimit_core);
+        }
+    }
+
+    if (geteuid() == 0) {
+        if (setgid(ccf->group) == -1) {
+            ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
+                          "setgid(%d) failed", ccf->group);
+            /* fatal */
+            exit(2);
+        }
+
+        if (initgroups(ccf->username, ccf->group) == -1) {
+            ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
+                          "initgroups(%s, %d) failed",
+                          ccf->username, ccf->group);
+        }
+
+#if (NGX_HAVE_PR_SET_KEEPCAPS && NGX_HAVE_CAPABILITIES)
+        if (ccf->transparent && ccf->user) {
+            if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) == -1) {
+                ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
+                              "prctl(PR_SET_KEEPCAPS, 1) failed");
+                /* fatal */
+                exit(2);
+            }
+        }
+#endif
+
+        if (setuid(ccf->user) == -1) {
+            ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
+                          "setuid(%d) failed", ccf->user);
+            /* fatal */
+            exit(2);
+        }
+
+#if (NGX_HAVE_CAPABILITIES)
+        if (ccf->transparent && ccf->user) {
+            struct __user_cap_data_struct    data;
+            struct __user_cap_header_struct  header;
+
+            ngx_memzero(&header, sizeof(struct __user_cap_header_struct));
+            ngx_memzero(&data, sizeof(struct __user_cap_data_struct));
+
+            header.version = _LINUX_CAPABILITY_VERSION_1;
+            data.effective = CAP_TO_MASK(CAP_NET_RAW);
+            data.permitted = data.effective;
+
+            if (syscall(SYS_capset, &header, &data) == -1) {
+                ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
+                              "capset() failed");
+                /* fatal */
+                exit(2);
+            }
+        }
+#endif
+    }
+
+    if (worker >= 0) {
+        cpu_affinity = ngx_get_cpu_affinity(worker);
+
+        if (cpu_affinity) {
+            ngx_setaffinity(cpu_affinity, cycle->log);
+        }
+    }
+
+#if (NGX_HAVE_PR_SET_DUMPABLE)
+
+    /* allow coredump after setuid() in Linux 2.4.x */
+
+    if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) == -1) {
+        ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
+                      "prctl(PR_SET_DUMPABLE) failed");
+    }
+
+#endif
+
+    if (ccf->working_directory.len) {
+        if (chdir((char *) ccf->working_directory.data) == -1) {
+            ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
+                          "chdir(\"%s\") failed", ccf->working_directory.data);
+            /* fatal */
+            exit(2);
+        }
+    }
+
+    sigemptyset(&set);
+
+    if (sigprocmask(SIG_SETMASK, &set, NULL) == -1) {
+        ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
+                      "sigprocmask() failed");
+    }
+
+    tp = ngx_timeofday();
+    srandom(((unsigned) ngx_pid << 16) ^ tp->sec ^ tp->msec);
+
+    if (worker >= 0) {
+        if (ccf->fstack_conf.len == 0) {
+            ngx_log_error(NGX_LOG_ALERT, cycle->log, 0,
+                          "fstack_conf null");
+            exit(2);
+        }
+
+        if (rdma_mod_init((const char *)ccf->fstack_conf.data, worker)) {
+            ngx_log_error(NGX_LOG_ALERT, cycle->log, 0,
+                        "rdma_mod_init failed");
+
+            exit(2);
+        }
+
+    }
+
+    for (n = 0; n < ngx_last_process; n++) {
+
+        if (ngx_processes[n].pid == -1) {
+            continue;
+        }
+
+        if (n == ngx_process_slot) {
+            continue;
+        }
+
+        if (ngx_processes[n].channel[1] == -1) {
+            continue;
+        }
+
+    }
+
+}
+#endif // NGX_HAVE_FSTACK
 
 static void
 ngx_worker_process_exit(ngx_cycle_t *cycle)
