@@ -10,6 +10,7 @@
 #include <ngx_event.h>
 #include <ngx_channel.h>
 
+#include "pdi_rdma.h"
 
 static void ngx_start_worker_processes(ngx_cycle_t *cycle, ngx_int_t n,
     ngx_int_t type);
@@ -891,7 +892,11 @@ ngx_worker_process_cycle_loop(void *arg)
 
     //ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0, "worker cycle");
 
+    (void) pdin_test_ngx_worker_tx(ngx_worker);
+
     ngx_process_events_and_timers(cycle);
+
+    (void) pdin_test_ngx_worker_rx(ngx_worker);
 
     if (ngx_terminate) {
         ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "exiting");
@@ -932,6 +937,8 @@ ngx_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     ngx_worker_process_init(cycle, worker);
 
     ngx_setproctitle("worker process");
+
+    pdin_init_worker_rings(cycle);
 
 #if (NGX_HAVE_FSTACK)
     ff_run(ngx_worker_process_cycle_loop, (void *)cycle);
@@ -1220,8 +1227,7 @@ rdma_worker_process_cycle_loop(void *arg)
 
     // rdma_process_events_and_timers(cycle);
 
-    printf("##### Run rdma_worker process_cycle_loop #####\n");
-    ngx_msleep(1000);
+    (void) pdin_test_rdma_worker_bounce(cycle);
 
     if (ngx_terminate) {
         ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "exiting");
@@ -1261,6 +1267,8 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     rdma_worker_process_init(cycle, worker);
 
     ngx_setproctitle("rdma process");
+
+    pdin_init_worker_rings(cycle);
 
     rdma_run(rdma_worker_process_cycle_loop, (void *)cycle);
 }
