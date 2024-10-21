@@ -80,6 +80,10 @@ sudo make install
 ```bash
 cd ~/palladium-ingress/
 bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
+
+# NOTE: add "-mssse3" to CFLAGS in objs/Makefile
+# For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
+
 make -j
 sudo make install
 ```
