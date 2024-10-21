@@ -9,6 +9,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#include "pdi_rdma.h"
 
 #if (NGX_HTTP_CACHE)
 static ngx_int_t ngx_http_upstream_cache(ngx_http_request_t *r,
@@ -2200,6 +2201,9 @@ ngx_http_upstream_send_request_body(ngx_http_request_t *r,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "http upstream send request body");
 
+    // NOTE: ngx worker writes rte ring here
+    (void) pdin_test_ngx_worker_tx();
+
     if (!r->request_body_no_buffering) {
 
         /* buffered request body */
@@ -2436,6 +2440,9 @@ ngx_http_upstream_process_header(ngx_http_request_t *r, ngx_http_upstream_t *u)
     for ( ;; ) {
 
         n = c->recv(c, u->buffer.last, u->buffer.end - u->buffer.last);
+
+        // NOTE: ngx worker read RX ring here
+        (void) pdin_test_ngx_worker_rx();
 
         if (n == NGX_AGAIN) {
 #if 0

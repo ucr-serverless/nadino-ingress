@@ -17,6 +17,6 @@ ngx_int_t init_unix_domain_sock(ngx_cycle_t *cycle);
 void ud_sock_send_message_to_worker(ngx_cycle_t *cycle);
 void ud_sock_receive_message_from_worker();
 
-void pdin_test_ngx_worker_tx(ngx_int_t ngx_worker);
-void pdin_test_ngx_worker_rx(ngx_int_t ngx_worker);
+void pdin_test_ngx_worker_tx(void);
+void pdin_test_ngx_worker_rx(void);
 void pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle);

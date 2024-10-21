@@ -892,11 +892,7 @@ ngx_worker_process_cycle_loop(void *arg)
 
     //ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0, "worker cycle");
 
-    (void) pdin_test_ngx_worker_tx(ngx_worker);
-
     ngx_process_events_and_timers(cycle);
-
-    (void) pdin_test_ngx_worker_rx(ngx_worker);
 
     if (ngx_terminate) {
         ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "exiting");

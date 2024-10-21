@@ -4193,13 +4193,9 @@ ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_OK;
     }
 
-    printf("============================================ clcf->name.data? %s\n", clcf->name.data);
-    printf("============================================ url->data? %s\n", url->data);
-
     if (ngx_strncasecmp(url->data, (u_char *) "http://", 7) == 0) {
         add = 7;
         port = 80;
-        printf("============================================Can you find me?\n");
 
     } else if (ngx_strncasecmp(url->data, (u_char *) "https://", 8) == 0) {
 
@@ -4217,7 +4213,7 @@ ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     } else if (ngx_strncasecmp(url->data, (u_char *) "rdma://", 7) == 0) {
         add = 7;
         port = 80;
-        printf("============================================ Hey I'm RDMA\n");
+        // NOTE: parse RDMA proxy_pass
 
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "invalid URL prefix");

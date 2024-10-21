@@ -285,7 +285,7 @@ ud_sock_receive_message_from_worker()
 }
 
 void
-pdin_test_ngx_worker_tx(ngx_int_t ngx_worker)
+pdin_test_ngx_worker_tx()
 {
     // send_message_to_worker(cycle);
 
@@ -300,6 +300,7 @@ pdin_test_ngx_worker_tx(ngx_int_t ngx_worker)
         for (i = 0; i < MAX_PKT_BURST; i++) {
             pkts_burst[i] = dummy_msg_alloc();
             snprintf(message, 100, "Hello from worker %ld [%d]: %d", ngx_worker, getpid(), i);
+            // NOTE: "ngx_worker" is globally visiable to all procedures in a worker process
             strcpy(pkts_burst[i]->buf_addr, message);
         }
 
@@ -309,7 +310,7 @@ pdin_test_ngx_worker_tx(ngx_int_t ngx_worker)
 }
 
 void
-pdin_test_ngx_worker_rx(ngx_int_t ngx_worker)
+pdin_test_ngx_worker_rx()
 {
     struct dummy_msg *pkts_burst[MAX_PKT_BURST];
 
