@@ -1266,6 +1266,14 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
 
     pdin_init_worker_rings(cycle);
 
+    // Init RDMA c6525-25g
+        // 0. read cfg
+        // 1. create socket
+        // 2. call consolidated init api
+        // 3. call rc creation api
+
+        // how to run DPDK with mellanox NIC
+
     rdma_run(rdma_worker_process_cycle_loop, (void *)cycle);
 }
 
