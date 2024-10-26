@@ -9,6 +9,7 @@ CORE_INCS="src/core"
 
 CORE_DEPS="src/core/nginx.h \
            src/core/pdi_rdma.h \
+           src/core/pdi_rdma_utils.h \
            src/core/ngx_config.h \
            src/core/ngx_core.h \
            src/core/ngx_log.h \
@@ -47,6 +48,7 @@ CORE_DEPS="src/core/nginx.h \
 
 CORE_SRCS="src/core/nginx.c \
            src/core/pdi_rdma.c \
+           src/core/pdi_rdma_utils.c \
            src/core/ngx_log.c \
            src/core/ngx_palloc.c \
            src/core/ngx_array.c \
