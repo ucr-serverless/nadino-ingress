@@ -7,6 +7,7 @@
 #include "ib.h"
 #include "qp.h"
 #include "rdma_config.h"
+#include <rte_mempool.h>
 #include <generic/rte_spinlock.h>
 #include <rte_spinlock.h>
 #include <stdint.h>

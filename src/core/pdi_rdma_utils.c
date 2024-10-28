@@ -29,6 +29,17 @@
 #define FIND_SLOT_RETRY_MAX 3
 #define NUM_WC 20
 
+void save_mempool_element_address(struct rte_mempool *mp, void *opaque, void *obj, unsigned int idx)
+{
+    void **addr_list = (void **)opaque;
+    addr_list[idx] = obj;
+}
+
+void retrieve_mempool_addresses(struct rte_mempool *mp, void **addr_list)
+{
+    rte_mempool_obj_iter(mp, save_mempool_element_address, addr_list);
+}
+
 int rdma_init()
 {
     int ret = 0;
