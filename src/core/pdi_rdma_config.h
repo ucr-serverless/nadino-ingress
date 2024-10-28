@@ -2,10 +2,11 @@
 #define _PDI_RDMA_CONFG_H
 
 #include <stdint.h>
-
+#include <stdlib.h>
 #include <glib.h>
 #include <rte_mempool.h>
 
+#include <libconfig.h>
 #include "pdi_rdma_utils.h"
 #include "ib.h"
 
