@@ -4,9 +4,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <glib.h>
+#include <ngx_config.h>
+#include <ngx_core.h>
 
 #include <rte_mempool.h>
-#include "ngx_log.h"
 
 #include <libconfig.h>
 #include "pdi_rdma_utils.h"
@@ -104,8 +105,5 @@ struct rdma_config
 extern struct rdma_config rdma_cfg;
 extern ngx_log_t * rdma_log;
 
-void set_rdma_log(ngx_log_t * log_obj)
-{
-    rdma_log = log_obj;
-}
+void set_rdma_log(ngx_log_t * log_obj);
 #endif

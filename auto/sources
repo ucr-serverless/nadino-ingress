@@ -8,13 +8,13 @@ CORE_MODULES="ngx_core_module ngx_errlog_module ngx_conf_module"
 CORE_INCS="src/core"
 
 CORE_DEPS="src/core/nginx.h \
-           src/core/pdi_rdma.h \
-           src/core/pdi_rdma_utils.h \
-           src/core/pdi_rdma_config.h \
-           src/core/pdi_rdma_sock.h \
            src/core/ngx_config.h \
            src/core/ngx_core.h \
            src/core/ngx_log.h \
+           src/core/pdi_rdma.h \
+           src/core/pdi_rdma_utils.h \
+           src/core/pdi_rdma_config.h \
+           src/core/pdi_rdma_sock.h
            src/core/ngx_palloc.h \
            src/core/ngx_array.h \
            src/core/ngx_list.h \
@@ -49,12 +49,12 @@ CORE_DEPS="src/core/nginx.h \
 
 
 CORE_SRCS="src/core/nginx.c \
+           src/core/ngx_log.c \
+           src/core/ngx_palloc.c \
            src/core/pdi_rdma.c \
            src/core/pdi_rdma_utils.c \
            src/core/pdi_rdma_config.c \
-           src/core/pdi_rdma_sock.c \
-           src/core/ngx_log.c \
-           src/core/ngx_palloc.c \
+           src/core/pdi_rdma_sock.c
            src/core/ngx_array.c \
            src/core/ngx_list.c \
            src/core/ngx_hash.c \

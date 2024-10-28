@@ -16,7 +16,8 @@
 # SPDX-License-Identifier: Apache-2.0
 */
 
-#include "pdi_rdma_sock.h"
+#include <ngx_config.h>
+#include <ngx_core.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -25,7 +26,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-ssize_t sock_utils_read(int sock_fd, void *buffer, size_t len)
+#include "pdi_rdma_sock.h"
+ssize_t sock_utils_read(int sock_fd, void *buffer, ssize_t len)
 {
     ssize_t nr, tot_read;
     char *buf = buffer; // avoid pointer arithmetic on void pointer
@@ -52,7 +54,7 @@ ssize_t sock_utils_read(int sock_fd, void *buffer, size_t len)
     return tot_read;
 }
 
-ssize_t sock_utils_write(int sock_fd, void *buffer, size_t len)
+ssize_t sock_utils_write(int sock_fd, void *buffer, ssize_t len)
 {
     ssize_t nw, tot_written;
     const char *buf = buffer; // avoid pointer arithmetic on void pointer
@@ -94,7 +96,7 @@ int sock_utils_bind(char *port)
     ret = getaddrinfo(NULL, port, &hints, &result);
     if (ret != 0)
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Error, fail to create sock bind");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Error, fail to create sock bind");
         goto error;
     }
 
@@ -126,7 +128,7 @@ int sock_utils_bind(char *port)
     }
     if (rp == NULL)
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Error, create socket");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Error, create socket");
         goto error;
     }
 
@@ -158,7 +160,7 @@ int sock_utils_connect(char *server_name, char *port)
     ret = getaddrinfo(server_name, port, &hints, &result);
     if (ret != 0)
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Error, create sock %s", gai_strerror(ret));
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Error, create sock %s", gai_strerror(ret));
         goto error;
     }
 
@@ -183,7 +185,7 @@ int sock_utils_connect(char *server_name, char *port)
 
     if (rp == NULL)
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Error, could not connect sock");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Error, could not connect sock");
         goto error;
     }
 
@@ -208,14 +210,14 @@ int set_socket_nonblocking(int sockfd)
     int flags = fcntl(sockfd, F_GETFL, 0);
     if (flags == -1)
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "get sock current flag fail", strerror(errno));
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "get sock current flag fail", strerror(errno));
         return -1;
     }
 
     // Set the socket to non-blocking mode
     if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1)
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "get sock current flag fail", strerror(errno));
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "get sock current flag fail", strerror(errno));
         return -1;
     }
     return 0;

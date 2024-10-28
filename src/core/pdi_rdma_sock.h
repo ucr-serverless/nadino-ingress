@@ -18,13 +18,15 @@
 #ifndef _PDI_RDMA_SOCK_H
 #define _PDI_RDMA_SOCK_H
 
+#include <ngx_config.h>
+#include <ngx_core.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include "pdi_rdma_config.h"
 
 
-ssize_t sock_utils_read(int sock_fd, void *buffer, size_t len);
-ssize_t sock_utils_write(int sock_fd, void *buffer, size_t len);
+ssize_t sock_utils_read(int sock_fd, void *buffer, ssize_t len);
+ssize_t sock_utils_write(int sock_fd, void *buffer, ssize_t len);
 
 int sock_utils_bind(char *port);
 int sock_utils_connect(char *server_name, char *port);

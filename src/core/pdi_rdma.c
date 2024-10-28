@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include <ngx_config.h>
+#include <ngx_core.h>
 #include "pdi_rdma.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -210,7 +212,7 @@ pdin_ngx_rx_mgr(ngx_int_t proc_id, struct dummy_msg **pkts_burst)
 
     for (i = 0; i < nb_rb; ++i) {
         // handle_msg((struct dummy_msg *)pkts_burst[i], proc_id);
-        printf("NGX Worker %d receives response from RDMA: %s \n", proc_id, pkts_burst[i]->buf_addr);
+        printf("NGX Worker %ld receives response from RDMA: %s \n", proc_id, pkts_burst[i]->buf_addr);
     }
 
     return nb_rb;

@@ -1,6 +1,8 @@
 #ifndef RDMA_UTILS
 #define RDMA_UTILS
 
+#include <ngx_config.h>
+#include <ngx_core.h>
 #include <glib.h>
 #include "ib.h"
 #include "qp.h"
@@ -78,8 +80,8 @@ int destroy_rdma_node_res(struct rdma_node_res *node_res);
 
 int qp_num_to_qp_res(struct rdma_node_res *res, uint32_t qp_num, struct qp_res **qpres);
 
+int rdma_two_side_rpc_client_send(int peer_node_idx, struct dummy_pkt *txn);
 
 int rdma_two_side_rpc_server(void *arg);
 
-int rdma_two_side_rpc_client(void *arg);
 #endif // !RDMA_UTILS

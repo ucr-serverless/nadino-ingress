@@ -1,12 +1,20 @@
 #include "pdi_rdma_config.h" 
-#include "ngx_core.h"
+#include <ngx_config.h>
+#include <ngx_core.h>
 #include "rte_errno.h"
 #include <stdlib.h>
 #include <unistd.h>
 
+#define MEMPOOL_NAME "PDI_MEMPOOL"
+#define REMOTE_MEMPOOL_NAME "PDI_REMOTE_MEMPOOL"
 struct rdma_config rdma_cfg;
 
 ngx_log_t * rdma_log;
+
+void set_rdma_log(ngx_log_t * log_obj)
+{
+    rdma_log = log_obj;
+}
 
 static void cfg_print(struct rdma_config * cfg)
 {
@@ -126,7 +134,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_read_file(&config, cfg_file);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "config_read_file() error: line %d: %s", config_error_line(&config), config_error_text(&config));
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "config_read_file() error: line %d: %s", config_error_line(&config), config_error_text(&config));
         goto error;
     }
 
@@ -333,7 +341,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     char local_hostname[HOST_NAME_MAX];
     if (gethostname(local_hostname, sizeof(local_hostname)) == -1)
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "gethostname() failed");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "gethostname() failed");
         goto error;
     }
     int is_hostname_matched = -1;
@@ -467,14 +475,14 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     setting = config_lookup(&config, "tenants");
     if (unlikely(setting == NULL))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenants configuration is required.");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Tenants configuration is required.");
         goto error;
     }
 
     ret = config_setting_is_list(setting);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenants configuration is required.");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Tenants configuration is required.");
         goto error;
     }
 
@@ -486,28 +494,28 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         subsetting = config_setting_get_elem(setting, i);
         if (unlikely(subsetting == NULL))
         {
-            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenant-%d's configuration is required.", i);
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Tenant-%d's configuration is required.", i);
             goto error;
         }
 
         ret = config_setting_is_group(subsetting);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenant-%d's configuration is required.", i);
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Tenant-%d's configuration is required.", i);
             goto error;
         }
 
         ret = config_setting_lookup_int(subsetting, "id", &id);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenant-%d's ID is required.", i);
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Tenant-%d's ID is required.", i);
             goto error;
         }
 
         ret = config_setting_lookup_int(subsetting, "weight", &weight);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenant-%d's weight is required.", i);
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Tenant-%d's weight is required.", i);
             goto error;
         }
 
@@ -516,7 +524,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
 
     if (is_hostname_matched == -1)
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "No matched hostname in %s", cfg_file);
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "No matched hostname in %s", cfg_file);
         goto error;
     }
 
@@ -576,7 +584,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "use_rdma", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "use_rdma setting is required.");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "use_rdma setting is required.");
         goto error;
     }
 
@@ -585,7 +593,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "use_one_side", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "use_one_side setting is required.");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "use_one_side setting is required.");
         goto error;
     }
 
@@ -598,7 +606,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "mr_per_qp", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rdma mr_per_qp setting is required.");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "rdma mr_per_qp setting is required.");
         goto error;
     }
 
@@ -608,7 +616,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "init_cqe_num", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rdma init_cqe_num setting is required.");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "rdma init_cqe_num setting is required.");
     }
 
     cfg->rdma_init_cqe_num = (uint32_t)value;
@@ -617,7 +625,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "max_send_wr", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rdma max_send_wr setting is required.");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "rdma max_send_wr setting is required.");
     }
 
     cfg->rdma_max_send_wr = (uint32_t)value;
@@ -625,7 +633,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "local_mempool_size", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rdma local_mempool_size setting is required.");
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "rdma local_mempool_size setting is required.");
         goto error;
     }
 
@@ -637,7 +645,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
                                       NULL, NULL, NULL, rte_socket_id(), 0);
     if (unlikely(cfg->mempool == NULL))
     {
-        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rte_mempool_create() error: %s", rte_strerror(rte_errno));
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "rte_mempool_create() error: %s", rte_strerror(rte_errno));
         goto error;
     }
 
@@ -655,7 +663,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
                                NULL, NULL, NULL, rte_socket_id(), 0);
         if (unlikely(cfg->remote_mempool == NULL))
         {
-            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rte_mempool_create() remote_mempool error: %s", rte_strerror(rte_errno));
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "rte_mempool_create() remote_mempool error: %s", rte_strerror(rte_errno));
             goto error;
         }
     }

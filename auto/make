@@ -40,6 +40,9 @@ CFLAGS = $CFLAGS
 CPP =	$CPP
 LINK =	$LINK
 
+
+# compress unused function warning
+CFLAGS += -Wno-unused-function
 CFLAGS += -mssse3 
 CFLAGS += \$(shell pkg-config --cflags libconfig glib-2.0)
 CFLAGS += -IRDMA_lib/include -LRDMA_lib -lRDMA_lib -libverbs
