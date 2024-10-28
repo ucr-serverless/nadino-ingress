@@ -10,12 +10,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 #include "ib.h"
 #include "rdma_config.h"
 
-// remove dependencies
-#include "log.h"
 
 #include "pdi_rdma_sock.h"
 #include "pdi_rdma_utils.h"
@@ -24,9 +24,9 @@
 #define FIND_SLOT_RETRY_MAX 3
 #define NUM_WC 20
 
-struct rdam_config* cfg = &rdma_cfg;
+struct rdma_config* cfg = &rdma_cfg;
 
-int destroy_control_server_socks()
+int destroy_control_server_socks(struct rdma_config* cfg)
 {
     if (!cfg->control_server_socks)
     {
@@ -42,13 +42,13 @@ int destroy_control_server_socks()
     return 0;
 }
 
-int control_server_socks_init()
+int control_server_socks_init(struct rdma_config* cfg)
 {
     cfg->control_server_socks = (int *)calloc(cfg->n_nodes, sizeof(int));
 
     if (unlikely(cfg->control_server_socks == NULL))
     {
-        log_error("allocate control server fd fail");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "allocate control server fd fail");
         goto error;
     }
     int ret = 0;
@@ -67,11 +67,11 @@ int control_server_socks_init()
 
         } while (sock_fd <= 0);
 
-        log_info("Connected to server: %s: %s", cfg->nodes[i].ip_address, buffer);
+        ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "Connected to server: %s: %s", cfg->nodes[i].ip_address, buffer);
         cfg->control_server_socks[i] = sock_fd;
         connected_nodes++;
     }
-    log_info("connected to all servers with idx lower than %d", self_idx);
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "connected to all servers with idx lower than %d", self_idx);
     if (connected_nodes == node_num - 1)
     {
         return 0;
@@ -80,7 +80,7 @@ int control_server_socks_init()
     int bind_fd = sock_utils_bind(buffer);
     if (bind_fd <= 0)
     {
-        log_error("failed to open listen socket");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "failed to open listen socket");
         return -1;
     }
     listen(bind_fd, 10);
@@ -88,7 +88,7 @@ int control_server_socks_init()
     struct sockaddr_in peer_addr;
     socklen_t peer_addr_len = sizeof(struct sockaddr_in);
     char client_ip[INET_ADDRSTRLEN];
-    log_info("accepting connections from other nodes");
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "accepting connections from other nodes");
     while (connected_nodes < node_num - 1)
     {
         peer_fd = accept(bind_fd, (struct sockaddr *)&peer_addr, &peer_addr_len);
@@ -97,7 +97,7 @@ int control_server_socks_init()
             continue;
         }
         inet_ntop(AF_INET, &peer_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-        log_info("client ip %s connected", client_ip);
+        ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "client ip %s connected", client_ip);
         for (size_t i = self_idx + 1; i < node_num; i++)
         {
             if (strcmp(cfg->nodes[i].ip_address, client_ip) == 0)
@@ -108,7 +108,7 @@ int control_server_socks_init()
         }
     }
     cfg->control_server_socks[self_idx] = 0;
-    log_info("control_server_socks initialized");
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "control_server_socks initialized");
     close(bind_fd);
 
     int keepalive = 1;
@@ -120,13 +120,13 @@ int control_server_socks_init()
             ret = setsockopt(cfg->control_server_socks[i], SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
             if (ret < 0)
             {
-                log_fatal("setsockopt(TCP_KEEPIDLE) control server");
+                ngx_log_error(NGX_LOG_CRIT, rdma_log, 0, "setsockopt(TCP_KEEPIDLE) control server");
                 goto error;
             }
             /* ret = set_socket_nonblocking(cfg->control_server_socks[i]); */
             /* if (ret < 0) */
             /* { */
-            /*     log_fatal("set sock non_blocking fail"); */
+            /*     ngx_log_error(NGX_LOG_CRIT, rdma_log, 0, "set sock non_blocking fail"); */
             /*     goto error; */
             /* } */
         }
@@ -134,11 +134,11 @@ int control_server_socks_init()
 
     return 0;
 error:
-    destroy_control_server_socks();
+    destroy_control_server_socks(cfg);
     return -1;
 }
 
-int exchange_rdma_info()
+int exchange_rdma_info(struct rdma_config *cfg)
 {
     int ret = 0;
     uint32_t local_idx = cfg->local_node_idx;
@@ -155,50 +155,46 @@ int exchange_rdma_info()
             ret = send_ib_res(&(cfg->node_res[local_idx].ibres), cfg->control_server_socks[i]);
             if (ret != RDMA_SUCCESS)
             {
-                log_error("send res to node idx %d failed", i);
+                ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "send res to node idx %d failed", i);
                 goto error;
             }
-            log_debug("local ibres sent to node %u", i);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local ibres sent to node %u", i);
             ret = recv_ib_res(&(cfg->node_res[i].ibres), cfg->control_server_socks[i]);
             if (ret != RDMA_SUCCESS)
             {
-                log_error("recv res from node idx %d failed", i);
+                ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "recv res from node idx %d failed", i);
                 goto error;
             }
-            log_debug("remote ibres recv from node %u", i);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote ibres recv from node %u", i);
         }
         if (i > local_idx)
         {
             ret = recv_ib_res(&(cfg->node_res[i].ibres), cfg->control_server_socks[i]);
             if (ret != RDMA_SUCCESS)
             {
-                log_error("recv res from node idx %d failed", i);
+                ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "recv res from node idx %d failed", i);
                 goto error;
             }
-            log_debug("remote ibres recv from node %u", i);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote ibres recv from node %u", i);
             ret = send_ib_res(&(cfg->node_res[local_idx].ibres), cfg->control_server_socks[i]);
             if (ret != RDMA_SUCCESS)
             {
-                log_error("send res to node idx %d failed", i);
+                ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "send res to node idx %d failed", i);
                 goto error;
             }
-            log_debug("local ibres sent to node %u", i);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local ibres sent to node %u", i);
         }
     }
-    log_debug("finished exchange information with all nodes");
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "finished exchange information with all nodes");
     for (size_t i = 0; i < node_num; i++)
     {
-        if (cfg->use_one_side == 1)
-        {
-            ret = rdma_one_side_node_res_init(&(cfg->node_res[i].ibres), &(cfg->node_res[i]));
-        }
         if (cfg->use_one_side == 0)
         {
             ret = rdma_two_side_node_res_init(&(cfg->node_res[i].ibres), &(cfg->node_res[i]));
         }
         if (ret != RDMA_SUCCESS)
         {
-            log_error("init node_res for idx %d failed", i);
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "init node_res for idx %d failed", i);
             goto error;
         }
     }
@@ -235,13 +231,6 @@ int rdma_init()
         .n_send_wc = NUM_WC,
         .n_recv_wc = NUM_WC,
     };
-    if (cfg->use_one_side == 1)
-    {
-        rparams.local_mr_num = cfg->local_mempool_size;
-        rparams.local_mr_size = cfg->local_mempool_elt_size;
-        rparams.remote_mr_num = cfg->remote_mempool_size;
-        rparams.remote_mr_size = cfg->remote_mempool_elt_size;
-    }
     if (cfg->use_one_side == 0)
     {
         rparams.local_mr_num = 0;
@@ -250,67 +239,44 @@ int rdma_init()
         rparams.remote_mr_size = cfg->local_mempool_elt_size;
     }
 
-    log_debug("local mr_size: %u", rparams.local_mr_size);
-    log_debug("remote mr_size: %u", rparams.remote_mr_size);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local mr_size: %u", rparams.local_mr_size);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote mr_size: %u", rparams.remote_mr_size);
 
     cfg->local_mempool_addrs = (void **)calloc(cfg->local_mempool_size, sizeof(void *));
     if (!cfg->local_mempool_addrs)
     {
-        log_error("failed to allocate local_mempool_addrs");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "failed to allocate local_mempool_addrs");
         goto error;
     }
     retrieve_mempool_addresses(cfg->mempool, cfg->local_mempool_addrs);
 
-    if (cfg->use_one_side == 1)
-    {
-        cfg->remote_mempool_addrs = (void **)calloc(cfg->remote_mempool_size, sizeof(void *));
-        if (!cfg->remote_mempool_addrs)
-        {
-            log_error("failed to allocate local_mempool_addrs");
-            goto error;
-        }
 
-        retrieve_mempool_addresses(cfg->remote_mempool, cfg->remote_mempool_addrs);
-    }
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "init RDMA ctx");
 
-    log_info("init RDMA ctx");
-
-    if (cfg->use_one_side == 1)
-    {
-        ret = init_ib_ctx(&cfg->rdma_ctx, &rparams, cfg->local_mempool_addrs, cfg->remote_mempool_addrs);
-    }
     if (cfg->use_one_side == 0)
     {
         ret = init_ib_ctx(&cfg->rdma_ctx, &rparams, NULL, cfg->local_mempool_addrs);
     }
 
-    log_info("init RDMA ctx finished");
-    log_debug("send cqe: %u", cfg->rdma_ctx.send_cqe);
-    log_debug("recv cqe: %u", cfg->rdma_ctx.recv_cqe);
-    log_debug("srq qe: %u", cfg->rdma_ctx.srqe);
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "init RDMA ctx finished");
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "send cqe: %u", cfg->rdma_ctx.send_cqe);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "recv cqe: %u", cfg->rdma_ctx.recv_cqe);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "srq qe: %u", cfg->rdma_ctx.srqe);
 
     cfg->rdma_unsignal_freq = cfg->rdma_ctx.max_send_wr / 2;
-    log_debug("unsignaled freq: %u", cfg->rdma_unsignal_freq);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "unsignaled freq: %u", cfg->rdma_unsignal_freq);
 
     if (unlikely(ret != RDMA_SUCCESS))
     {
-        log_error("init ib ctx fail");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "init ib ctx fail");
         goto error;
     }
 
     cfg->mp_elt_to_mr_map = g_hash_table_new(g_direct_hash, g_direct_equal);
     if (!cfg->mp_elt_to_mr_map)
     {
-        log_error("failed to allocate mp_elt_to_mr_map");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "failed to allocate mp_elt_to_mr_map");
         goto error;
-    }
-    if (cfg->use_one_side == 1)
-    {
-        for (size_t i = 0; i < rparams.local_mr_num; i++)
-        {
-            g_hash_table_insert(cfg->mp_elt_to_mr_map, (gpointer)cfg->local_mempool_addrs[i],
-                                cfg->rdma_ctx.local_mrs[i]);
-        }
     }
     if (cfg->use_one_side == 0)
     {
@@ -318,7 +284,7 @@ int rdma_init()
         {
             g_hash_table_insert(cfg->mp_elt_to_mr_map, (gpointer)cfg->local_mempool_addrs[i],
                                 cfg->rdma_ctx.remote_mrs[i]);
-            /* log_debug("mr addr: %p, mp_elt addr: %p", cfg->rdma_ctx.remote_mrs[i]->addr,
+            /* ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "mr addr: %p, mp_elt addr: %p", cfg->rdma_ctx.remote_mrs[i]->addr,
              * cfg->local_mempool_addrs[i]); */
         }
     }
@@ -327,7 +293,7 @@ int rdma_init()
 
     if (unlikely(cfg->node_res == NULL))
     {
-        log_error("allocate node res fail");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "allocate node res fail");
         goto error;
     }
     return 0;
@@ -410,7 +376,7 @@ int rdma_qp_connection_init_node(uint32_t remote_node_idx)
                                     &cfg->node_res[remote_node_idx].ibres, peer_qp_num);
         if (ret != RDMA_SUCCESS)
         {
-            log_error("init qp to node: %u, qp_num: %u failed", remote_node_idx, remote_qp_slot_start + i);
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "init qp to node: %u, qp_num: %u failed", remote_node_idx, remote_qp_slot_start + i);
             goto error;
         }
         local_qpres->peer_qp_id.qp_num = peer_qp_num;
@@ -428,10 +394,10 @@ int rdma_qp_connection_init_node(uint32_t remote_node_idx)
 
         g_array_append_val(remote_res->connected_qp_res_array, cqp);
 
-        log_debug("pushed connected_qp_res to node_idx: %u from qp_num: %u to %u, array size %d", remote_node_idx,
+        ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "pushed connected_qp_res to node_idx: %u from qp_num: %u to %u, array size %d", remote_node_idx,
                   cqp.local_qpres->qp_num, cqp.remote_qpres->qp_num, remote_res->connected_qp_res_array->len);
     }
-    log_debug("%u RDMA_connections to node: %u established", n_qp_connect, remote_node_idx);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "%u RDMA_connections to node: %u established", n_qp_connect, remote_node_idx);
     return 0;
 error:
 
@@ -444,26 +410,26 @@ int post_two_side_srq_recv(uint32_t wr_id, void **addr)
     ret = rte_mempool_get(cfg->mempool, addr);
     if (unlikely(ret < 0))
     {
-        log_error("rte_mempool_get() error: %s", rte_strerror(-ret));
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rte_mempool_get() error: %s", rte_strerror(-ret));
         goto error;
     }
     struct ibv_mr *mr = (struct ibv_mr *)g_hash_table_lookup(cfg->mp_elt_to_mr_map, (gpointer) * (addr));
     if (mr == NULL)
     {
-        log_error("txn: %p not valid", *addr);
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "txn: %p not valid", *addr);
         goto error;
     }
-    /* log_debug("mr addr: %p, mp_elt addr: %p", mr->addr, *addr); */
+    /* ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "mr addr: %p, mp_elt addr: %p", mr->addr, *addr); */
     if (mr->addr != *addr)
     {
-        log_fatal("looked up mr addr does not equal to mp_elt addr");
+        ngx_log_error(NGX_LOG_CRIT, rdma_log, 0, "looked up mr addr does not equal to mp_elt addr");
         goto error;
     }
-    log_debug("get mp elt addr: %p", *addr);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "get mp elt addr: %p", *addr);
     ret = post_srq_recv(cfg->rdma_ctx.srq, mr->addr, sizeof(struct dummy_pkt), mr->lkey, wr_id);
     if (unlikely(ret != RDMA_SUCCESS))
     {
-        log_error("post srq fail");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "post srq fail");
         goto error;
     }
     return 0;
@@ -490,17 +456,7 @@ int rdma_qp_connection_init()
         ret = rdma_qp_connection_init_node(i);
         if (ret != 0)
         {
-            log_error("connect qp to node: %u failed", i);
-            goto error;
-        }
-    }
-    if (cfg->use_one_side == 1)
-    {
-        ret = pre_post_dumb_srq_recv(cfg->rdma_ctx.srq, cfg->rdma_ctx.remote_mrs[0]->addr, cfg->rdma_remote_mr_size,
-                                     cfg->rdma_ctx.remote_mrs[0]->lkey, 0, MIN(cfg->rdma_ctx.srqe, 10000));
-        if (ret != RDMA_SUCCESS)
-        {
-            log_error("pre post srq recv failed");
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "connect qp to node: %u failed", i);
             goto error;
         }
     }
@@ -512,13 +468,13 @@ int rdma_qp_connection_init()
             ret = post_two_side_srq_recv(i, &addr);
             if (unlikely(ret == -1))
             {
-                log_error("pre post srq recv failed");
+                ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "pre post srq recv failed");
                 goto error;
             }
             g_hash_table_insert(cfg->node_res[local_idx].wr_to_addr, GINT_TO_POINTER(i), addr);
-            log_debug("insert %p into map", addr);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "insert %p into map", addr);
         }
-        log_debug("post two side srq recv finished");
+        ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "post two side srq recv finished");
     }
     return 0;
 error:
@@ -539,7 +495,7 @@ int rdma_two_side_node_res_init(struct ib_res *ibres, struct rdma_node_res *node
     noderes->qpres = (struct qp_res *)calloc(ibres->n_qp, sizeof(struct qp_res));
     if (!(noderes)->qpres)
     {
-        log_error("Failed to allocate qp_res");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Failed to allocate qp_res");
         return RDMA_FAILURE;
     }
     for (size_t i = 0; i < ibres->n_qp; i++)
@@ -653,10 +609,10 @@ int qp_num_to_qp_res(struct rdma_node_res *res, uint32_t qp_num, struct qp_res *
 int select_qp_rr(int peer_node_idx, struct rdma_node_res *noderes, struct connected_qp **qpres)
 {
     int array_size = noderes->connected_qp_res_array->len;
-    log_debug("size of array: %d", array_size);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "size of array: %d", array_size);
     if (array_size == 0)
     {
-        log_error("no qp connected for node: %u", peer_node_idx);
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "no qp connected for node: %u", peer_node_idx);
         goto error;
     }
     noderes->last_connected_qp_mark = (noderes->last_connected_qp_mark + 1) % array_size;
@@ -670,10 +626,10 @@ error:
 int select_qp_rand(int peer_node_idx, struct rdma_node_res *noderes, struct connected_qp **qpres)
 {
     int array_size = noderes->connected_qp_res_array->len;
-    log_debug("size of array: %d", array_size);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "size of array: %d", array_size);
     if (array_size == 0)
     {
-        log_error("no qp connected for node: %u", peer_node_idx);
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "no qp connected for node: %u", peer_node_idx);
         goto error;
     }
     noderes->last_connected_qp_mark = (noderes->last_connected_qp_mark + 1) % array_size;
@@ -693,7 +649,7 @@ int rdma_two_side_rpc_client_send(int peer_node_idx, struct dummy_pkt *txn)
     int num_completion;
 
     int message_size = sizeof(struct dummy_pkt);
-    log_debug("Route id: %u, Hop Count %u, Next Hop: %u, Next Fn: %u, \
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "Route id: %u, Hop Count %u, Next Hop: %u, Next Fn: %u, \
         Caller Fn: %s (#%u), RPC Handler: %s()",
               txn->route_id, txn->hop_count, cfg->route[txn->route_id].hop[txn->hop_count], txn->next_fn,
               txn->caller_nf, txn->caller_fn, txn->rpc_handler);
@@ -702,7 +658,7 @@ int rdma_two_side_rpc_client_send(int peer_node_idx, struct dummy_pkt *txn)
     ret = select_qp_rr(peer_node_idx, &cfg->node_res[peer_node_idx], &cqp);
     if (unlikely(ret == -1))
     {
-        log_error("select qp fail");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "select qp fail");
         goto error;
     }
 
@@ -711,7 +667,7 @@ int rdma_two_side_rpc_client_send(int peer_node_idx, struct dummy_pkt *txn)
     struct ibv_mr *local_mr = (struct ibv_mr *)g_hash_table_lookup(cfg->mp_elt_to_mr_map, (gpointer)txn);
     if (local_mr == NULL)
     {
-        log_error("txn: %p not valid", txn);
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "txn: %p not valid", txn);
         goto error;
     }
 
@@ -722,7 +678,7 @@ int rdma_two_side_rpc_client_send(int peer_node_idx, struct dummy_pkt *txn)
 
     if (local_qpres->unsignaled_cnt == cfg->rdma_unsignal_freq)
     {
-        log_debug("post write imm signaled");
+        ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "post write imm signaled");
         ret = post_send_signaled(local_qpres->qp, (char *)txn, message_size, local_mr->lkey, 0, 0);
         local_qpres->unsignaled_cnt = 0;
         do
@@ -731,33 +687,33 @@ int rdma_two_side_rpc_client_send(int peer_node_idx, struct dummy_pkt *txn)
         } while (num_completion == 0);
         if (unlikely(num_completion < 0))
         {
-            log_error("poll send completion error");
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "poll send completion error");
             goto error;
         }
         local_qpres->outstanding_cnt -= num_completion;
     }
     else
     {
-        log_debug("post write imm unsignaled");
+        ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "post write imm unsignaled");
         ret = post_send_unsignaled(local_qpres->qp, (char *)txn, message_size, local_mr->lkey, 0, 0);
         local_qpres->unsignaled_cnt++;
         local_qpres->outstanding_cnt++;
     }
     if (unlikely(ret != RDMA_SUCCESS))
     {
-        log_error("post imm unsignaled failed");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "post imm unsignaled failed");
         goto error;
     }
 
-    log_debug("peer_node_idx: %d \t sizeof(*txn): %ld", peer_node_idx, sizeof(*txn));
-    log_debug("rpc_client_send is done.");
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "peer_node_idx: %d \t sizeof(*txn): %ld", peer_node_idx, sizeof(*txn));
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "rpc_client_send is done.");
     return 0;
 error:
     return -1;
 }
 int rdma_two_side_rpc_client(void *arg)
 {
-    log_info("rdma_rpc_client init");
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "rdma_rpc_client init");
     srand(time(NULL));
     int epoll_fd;
     struct epoll_event ev, events[N_EVENTS_MAX];
@@ -767,7 +723,7 @@ int rdma_two_side_rpc_client(void *arg)
     epoll_fd = epoll_create1(0);
     if (epoll_fd == -1)
     {
-        log_error("epoll_create1() error: %s", strerror(errno));
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "epoll_create1() error: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
@@ -788,7 +744,7 @@ int rdma_two_side_rpc_client(void *arg)
         nfds = epoll_wait(epoll_fd, events, N_EVENTS_MAX, -1);
         if (nfds == -1)
         {
-            log_error("epoll_wait() error: %s", strerror(errno));
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "epoll_wait() error: %s", strerror(errno));
             exit(EXIT_FAILURE);
         }
 
@@ -796,7 +752,7 @@ int rdma_two_side_rpc_client(void *arg)
         {
             tenant_pipe *tp = (tenant_pipe *)events[n].data.ptr;
 
-            log_debug("Tenant-%d's pipe is ready to be consumed ...", tp->tenant_id);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "Tenant-%d's pipe is ready to be consumed ...", tp->tenant_id);
 
             while (1)
             {
@@ -810,7 +766,7 @@ int rdma_two_side_rpc_client(void *arg)
                     }
                 }
 
-                log_debug("Tenant ID: %d \t Assigned Weight: %d \t Current Weight: %d ", current_index,
+                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "Tenant ID: %d \t Assigned Weight: %d \t Current Weight: %d ", current_index,
                           tenant_pipes[current_index].weight, current_weight);
 
                 if (current_index == tp->tenant_id && tenant_pipes[current_index].weight >= current_weight)
@@ -842,12 +798,12 @@ int rdma_two_side_rpc_client(void *arg)
 int rdma_two_side_rpc_server(void *arg)
 {
 
-    log_info("rdma_rpc_server init");
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "rdma_rpc_server init");
     int n_events;
     int i;
     struct dummy_pkt *txn = NULL;
     int *pipefd_dispacher = (int *)arg;
-    log_debug("pipe fd", pipefd_dispacher[1]);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "pipe fd", pipefd_dispacher[1]);
     int ret = 0;
     uint32_t wr_id = 0;
     void *new_addr = NULL;
@@ -856,26 +812,26 @@ int rdma_two_side_rpc_server(void *arg)
     struct ibv_wc *wc = cfg->rdma_ctx.recv_wc;
     if (unlikely(!wc))
     {
-        log_error("allocate %u ibv_wc failed", NUM_WC);
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "allocate %u ibv_wc failed", NUM_WC);
         return -1;
     }
-    log_debug("rdma_rpc_server initialized");
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "rdma_rpc_server initialized");
 
     while (1)
     {
         n_events = ibv_poll_cq(cfg->rdma_ctx.recv_cq, NUM_WC, wc);
         if (unlikely(n_events < 0))
         {
-            log_error("failed to poll cq");
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "failed to poll cq");
             goto error;
         }
         for (i = 0; i < n_events; i++)
         {
 
-            log_debug("Receiving from PEER GW.");
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "Receiving from PEER GW.");
             if (wc[i].status != IBV_WC_SUCCESS)
             {
-                log_error("wc failed status: %s.", ibv_wc_status_str(wc[i].status));
+                ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "wc failed status: %s.", ibv_wc_status_str(wc[i].status));
                 goto error;
             }
 
@@ -884,34 +840,34 @@ int rdma_two_side_rpc_server(void *arg)
             {
                 if (wc[i].byte_len != sizeof(struct dummy_pkt))
                 {
-                    log_error("recved len %u, not size of dummy_pkt", wc[i].byte_len);
+                    ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "recved len %u, not size of dummy_pkt", wc[i].byte_len);
                     goto error;
                 }
                 // only post less than uint32_t recv req
 
                 txn = (struct dummy_pkt *)g_hash_table_lookup(local_noderes.wr_to_addr, GINT_TO_POINTER(wr_id));
 
-                log_debug("current wr_id is %u", wr_id);
+                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "current wr_id is %u", wr_id);
             }
             else
             {
-                log_debug("receive opcode %u", wc[i].opcode);
+                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "receive opcode %u", wc[i].opcode);
             }
 
             ret = post_two_side_srq_recv(wr_id, &new_addr);
             if (unlikely(ret != 0))
             {
-                log_error("post srq recv failed");
+                ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "post srq recv failed");
                 goto error;
             }
             g_hash_table_insert(local_noderes.wr_to_addr, GINT_TO_POINTER(wr_id), new_addr);
 
-            log_debug("\tRoute id: %u, Hop Count %u, Next Hop: %u, Next Fn: %u", txn->route_id, txn->hop_count,
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "\tRoute id: %u, Hop Count %u, Next Hop: %u, Next Fn: %u", txn->route_id, txn->hop_count,
                       cfg->route[txn->route_id].hop[txn->hop_count], txn->next_fn);
             ssize_t bytes_written = write(pipefd_dispacher[1], &txn, sizeof(struct dummy_pkt *));
             if (unlikely(bytes_written == -1))
             {
-                log_error("write() error: %s", strerror(errno));
+                ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "write() error: %s", strerror(errno));
                 goto error;
             }
         }

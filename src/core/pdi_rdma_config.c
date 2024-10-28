@@ -1,5 +1,8 @@
 #include "pdi_rdma_config.h" 
 #include "ngx_core.h"
+#include "rte_errno.h"
+#include <stdlib.h>
+#include <unistd.h>
 
 struct rdma_config rdma_cfg;
 
@@ -92,6 +95,10 @@ static void cfg_print(struct rdma_config * cfg)
     printf("Remote mempool elt size: %u\n", cfg->remote_mempool_elt_size);
 }
 
+void set_node(struct rdma_config *cfg, uint8_t fn_id, uint8_t node_idx)
+{
+    cfg->inter_node_rt[fn_id] = node_idx;
+}
 static int cfg_init(char *cfg_file, struct rdma_config * cfg)
 {
     config_setting_t *subsubsetting = NULL;
@@ -112,14 +119,14 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     int port;
     int weight;
 
-    log_debug("size of http_transaction: %lu\n", sizeof(struct http_transaction));
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "size of dummy_pkt: %lu\n", sizeof(struct dummy_pkt));
 
     config_init(&config);
 
     ret = config_read_file(&config, cfg_file);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_error("config_read_file() error: line %d: %s", config_error_line(&config), config_error_text(&config));
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "config_read_file() error: line %d: %s", config_error_line(&config), config_error_text(&config));
         goto error;
     }
 
@@ -234,12 +241,12 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         ret = config_setting_lookup_int(subsetting, "node", &node);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_info("Set default node as 0.");
+            ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "Set default node as 0.");
             node = 0;
         }
 
         cfg->nf[id - 1].node = node;
-        set_node(id, node);
+        set_node(cfg, id, node);
     }
 
     setting = config_lookup(&config, "routes");
@@ -326,7 +333,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     char local_hostname[HOST_NAME_MAX];
     if (gethostname(local_hostname, sizeof(local_hostname)) == -1)
     {
-        log_error("gethostname() failed");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "gethostname() failed");
         goto error;
     }
     int is_hostname_matched = -1;
@@ -334,14 +341,14 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     setting = config_lookup(&config, "nodes");
     if (unlikely(setting == NULL))
     {
-        log_warn("Nodes configuration is missing.");
+        ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Nodes configuration is missing.");
         goto error;
     }
 
     ret = config_setting_is_list(setting);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_warn("Nodes configuration is missing.");
+        ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Nodes configuration is missing.");
         goto error;
     }
 
@@ -353,28 +360,28 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         subsetting = config_setting_get_elem(setting, i);
         if (unlikely(subsetting == NULL))
         {
-            log_warn("Node configuration is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node configuration is missing.");
             goto error;
         }
 
         ret = config_setting_is_group(subsetting);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("Node configuration is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node configuration is missing.");
             goto error;
         }
 
         ret = config_setting_lookup_int(subsetting, "id", &id);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("Node ID is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node ID is missing.");
             goto error;
         }
 
         ret = config_setting_lookup_string(subsetting, "hostname", &hostname);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("Node hostname is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node hostname is missing.");
             goto error;
         }
 
@@ -385,17 +392,17 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         {
             cfg->local_node_idx = i;
             is_hostname_matched = 1;
-            log_info("Hostnames match: %s, node index: %u", local_hostname, i);
+            ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "Hostnames match: %s, node index: %u", local_hostname, i);
         }
         else
         {
-            log_debug("Hostnames do not match. Got: %s, Expected: %s", local_hostname, hostname);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "Hostnames do not match. Got: %s, Expected: %s", local_hostname, hostname);
         }
 
         ret = config_setting_lookup_string(subsetting, "ip_address", &ip_address);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("Node ip_address is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node ip_address is missing.");
             goto error;
         }
 
@@ -404,7 +411,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         ret = config_setting_lookup_int(subsetting, "port", &port);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("Node port is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node port is missing.");
             goto error;
         }
 
@@ -413,7 +420,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         ret = config_setting_lookup_int(subsetting, "control_server_port", &port);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("Node control server port is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node control server port is missing.");
             goto error;
         }
 
@@ -422,7 +429,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         ret = config_setting_lookup_int(subsetting, "device_idx", &value);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("RDMA device_idx is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "RDMA device_idx is missing.");
             goto error;
         }
 
@@ -431,7 +438,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         ret = config_setting_lookup_int(subsetting, "sgid_idx", &value);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("RDMA sgid_idx is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "RDMA sgid_idx is missing.");
             goto error;
         }
 
@@ -440,7 +447,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         ret = config_setting_lookup_int(subsetting, "ib_port", &value);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("RDMA ib_port is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "RDMA ib_port is missing.");
             goto error;
         }
 
@@ -449,7 +456,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         ret = config_setting_lookup_int(subsetting, "qp_num", &value);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_warn("RDMA qp_num is missing.");
+            ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "RDMA qp_num is missing.");
             goto error;
         }
 
@@ -460,14 +467,14 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     setting = config_lookup(&config, "tenants");
     if (unlikely(setting == NULL))
     {
-        log_error("Tenants configuration is required.");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenants configuration is required.");
         goto error;
     }
 
     ret = config_setting_is_list(setting);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_error("Tenants configuration is required.");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenants configuration is required.");
         goto error;
     }
 
@@ -479,28 +486,28 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         subsetting = config_setting_get_elem(setting, i);
         if (unlikely(subsetting == NULL))
         {
-            log_error("Tenant-%d's configuration is required.", i);
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenant-%d's configuration is required.", i);
             goto error;
         }
 
         ret = config_setting_is_group(subsetting);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_error("Tenant-%d's configuration is required.", i);
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenant-%d's configuration is required.", i);
             goto error;
         }
 
         ret = config_setting_lookup_int(subsetting, "id", &id);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_error("Tenant-%d's ID is required.", i);
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenant-%d's ID is required.", i);
             goto error;
         }
 
         ret = config_setting_lookup_int(subsetting, "weight", &weight);
         if (unlikely(ret == CONFIG_FALSE))
         {
-            log_error("Tenant-%d's weight is required.", i);
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "Tenant-%d's weight is required.", i);
             goto error;
         }
 
@@ -509,7 +516,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
 
     if (is_hostname_matched == -1)
     {
-        log_error("No matched hostname in %s", cfg_file);
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "No matched hostname in %s", cfg_file);
         goto error;
     }
 
@@ -529,7 +536,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_string(setting, "hostname", &hostname);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_warn("Node hostname is missing.");
+        ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node hostname is missing.");
         goto error;
     }
 
@@ -537,7 +544,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_string(setting, "ip_address", &ip_address);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_warn("Node ip_address is missing.");
+        ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node ip_address is missing.");
         goto error;
     }
 
@@ -546,7 +553,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "port", &port);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_warn("Node port is missing.");
+        ngx_log_error(NGX_LOG_WARN, rdma_log, 0, "Node port is missing.");
         goto error;
     }
 
@@ -569,7 +576,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "use_rdma", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_error("use_rdma setting is required.");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "use_rdma setting is required.");
         goto error;
     }
 
@@ -578,20 +585,20 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "use_one_side", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_error("use_one_side setting is required.");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "use_one_side setting is required.");
         goto error;
     }
 
     cfg->use_one_side = value;
 
-    cfg->rdma_slot_size = sizeof(struct http_transaction);
+    cfg->rdma_slot_size = sizeof(struct dummy_pkt);
 
-    cfg->rdma_remote_mr_size = sizeof(struct http_transaction) * 1;
+    cfg->rdma_remote_mr_size = sizeof(struct dummy_pkt) * 1;
 
     ret = config_setting_lookup_int(setting, "mr_per_qp", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_error("rdma mr_per_qp setting is required.");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rdma mr_per_qp setting is required.");
         goto error;
     }
 
@@ -601,7 +608,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "init_cqe_num", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_error("rdma init_cqe_num setting is required.");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rdma init_cqe_num setting is required.");
     }
 
     cfg->rdma_init_cqe_num = (uint32_t)value;
@@ -610,7 +617,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "max_send_wr", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_error("rdma max_send_wr setting is required.");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rdma max_send_wr setting is required.");
     }
 
     cfg->rdma_max_send_wr = (uint32_t)value;
@@ -618,19 +625,19 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     ret = config_setting_lookup_int(setting, "local_mempool_size", &value);
     if (unlikely(ret == CONFIG_FALSE))
     {
-        log_error("rdma local_mempool_size setting is required.");
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rdma local_mempool_size setting is required.");
         goto error;
     }
 
     cfg->local_mempool_size = (uint32_t)value;
 
-    cfg->local_mempool_elt_size = sizeof(struct http_transaction);
+    cfg->local_mempool_elt_size = sizeof(struct dummy_pkt);
     /* TODO: Change "flags" argument */
     cfg->mempool = rte_mempool_create(MEMPOOL_NAME, cfg->local_mempool_size, cfg->local_mempool_elt_size, 0, 0, NULL,
                                       NULL, NULL, NULL, rte_socket_id(), 0);
     if (unlikely(cfg->mempool == NULL))
     {
-        log_error("rte_mempool_create() error: %s", rte_strerror(rte_errno));
+        ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rte_mempool_create() error: %s", rte_strerror(rte_errno));
         goto error;
     }
 
@@ -648,14 +655,14 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
                                NULL, NULL, NULL, rte_socket_id(), 0);
         if (unlikely(cfg->remote_mempool == NULL))
         {
-            log_error("rte_mempool_create() remote_mempool error: %s", rte_strerror(rte_errno));
+            ngx_log_error(NGX_LOG_STDERR, rdma_log, 0, "rte_mempool_create() remote_mempool error: %s", rte_strerror(rte_errno));
             goto error;
         }
     }
 
     config_destroy(&config);
-    cfg_print();
-    log_debug("cfg initialize finished\n");
+    cfg_print(cfg);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "cfg initialize finished\n");
 
     return 0;
 

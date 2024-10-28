@@ -1,6 +1,12 @@
 #include <stdio.h>
 
 #include "pdi_rdma.h"
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <sys/un.h>
+#include <ngx_core.h>
+
 
 static int u_sockfd;
 static int worker_msg_cnt;
@@ -14,7 +20,6 @@ static struct rte_ring *ngx_worker_tx_rings[100]; // TODO: replace 100 with max 
 static struct rte_mempool *message_pool;
 #define NGX_WORKER_RING_SIZE 32
 #define DUMMY_MSG_POOL "dummy_msg_pool"
-#define MAX_MSG_BUF_SIZE 10240
 #define MAX_PKT_BURST 16
 
 
@@ -205,7 +210,7 @@ pdin_ngx_rx_mgr(ngx_int_t proc_id, struct dummy_msg **pkts_burst)
 
     for (i = 0; i < nb_rb; ++i) {
         // handle_msg((struct dummy_msg *)pkts_burst[i], proc_id);
-        printf("NGX Worker %ld receives response from RDMA: %s \n", proc_id, pkts_burst[i]->buf_addr);
+        printf("NGX Worker %d receives response from RDMA: %s \n", proc_id, pkts_burst[i]->buf_addr);
     }
 
     return nb_rb;

@@ -101,7 +101,7 @@ struct rdma_config
 };
 
 
-extern struct rdam_config rdma_cfg;
+extern struct rdma_config rdma_cfg;
 extern ngx_log_t * rdma_log;
 
 void set_rdma_log(ngx_log_t * log_obj)
