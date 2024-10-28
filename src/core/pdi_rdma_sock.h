@@ -20,6 +20,7 @@
 
 #include <inttypes.h>
 #include <stdlib.h>
+#include "pdi_rdma_config.h"
 
 
 ssize_t sock_utils_read(int sock_fd, void *buffer, size_t len);

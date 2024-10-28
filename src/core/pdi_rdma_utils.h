@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include "pdi_rdma.h"
-
+#include "pdi_rdma_config.h"
 
 struct dummy_pkt
 {

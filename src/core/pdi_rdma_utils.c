@@ -24,7 +24,7 @@
 #define FIND_SLOT_RETRY_MAX 3
 #define NUM_WC 20
 
-struct rdam_config* cfg = &rdma_confg;
+struct rdam_config* cfg = &rdma_cfg;
 
 int destroy_control_server_socks()
 {

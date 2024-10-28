@@ -1,6 +1,9 @@
 #include "pdi_rdma_config.h" 
+#include "ngx_core.h"
 
 struct rdma_config rdma_cfg;
+
+ngx_log_t * rdma_log;
 
 static void cfg_print(struct rdma_config * cfg)
 {
