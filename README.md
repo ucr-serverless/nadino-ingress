@@ -102,3 +102,19 @@ sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
 
 NGINX documentation is available at http://nginx.org
 
+## How to add new source file?
+
+Create new files, include the two necessary header file, according to [nginx development guide](https://nginx.org/en/docs/dev/development_guide.html)
+
+```c
+#include <ngx_config.h>
+#include <ngx_core.h>
+```
+
+Add file to compilation system by adding new file in `auto/sources`
+
+## How to add new compilation flags?
+
+To add a new CFLAGS, just add new lines in `auto/make`
+
+To add new library, add new libraries to `CORE_LIBS` in `auto/make`
