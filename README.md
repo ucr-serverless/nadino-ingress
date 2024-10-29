@@ -38,24 +38,24 @@ pip3 install pyelftools --upgrade
 cd palladium-ingress/f-stack/dpdk/
 meson setup -Denable_kmods=true build
 ninja -C build
-ninja -C build install
+sudo ninja -C build install
 
 # Set hugepage at system-wide (Option#1)
 sudo sysctl -w vm.nr_hugepages=16384
 
 # Set hugepage (Option#2)
-# single-node system (Option#2)
+# single-node system (Option#2) (use root)
 echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
 
-# or NUMA (Option#2)
+# or NUMA (Option#2) (use root)
 echo 1024 > /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
 echo 1024 > /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages
 
 # Using Hugepage with the DPDK
-mkdir /mnt/huge
-mount -t hugetlbfs nodev /mnt/huge
+sudo mkdir /mnt/huge
+sudo mount -t hugetlbfs nodev /mnt/huge
 
-# Close ASLR; it is necessary in multiple process
+# Close ASLR; it is necessary in multiple process (use root)
 echo 0 > /proc/sys/kernel/randomize_va_space
 
 # Install the DPDK driver (igb_uio) for Intel NICs (Not needed for Mellanox NICs)
@@ -102,3 +102,19 @@ sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
 
 NGINX documentation is available at http://nginx.org
 
+## How to add new source file?
+
+Create new files, include the two necessary header file, according to [nginx development guide](https://nginx.org/en/docs/dev/development_guide.html)
+
+```c
+#include <ngx_config.h>
+#include <ngx_core.h>
+```
+
+Add file to compilation system by adding new file in `auto/sources`
+
+## How to add new compilation flags?
+
+To add a new CFLAGS, just add new lines in `auto/make`
+
+To add new library, add new libraries to `CORE_LIBS` in `auto/make`

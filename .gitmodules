@@ -3,4 +3,4 @@
 	url = https://github.com/F-Stack/f-stack.git
 [submodule "RDMA_lib"]
 	path = RDMA_lib
-	url = https://github.com/ucr-serverless/RDMA_lib.git
+	url = git@github.com:ucr-serverless/RDMA_lib.git
