@@ -5,6 +5,7 @@ bear:
     bear -- make
 
 make:
+    make clean
     bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 
 kill:

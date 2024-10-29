@@ -32,6 +32,8 @@ fi
 CORE_LIBS="$CORE_LIBS \$(shell pkg-config --static --libs libdpdk)"
 CORE_LIBS="$CORE_LIBS -L$FF_PATH/lib -Wl,--whole-archive,-lfstack,--no-whole-archive"
 CORE_LIBS="$CORE_LIBS -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma"
+CORE_LIBS="$CORE_LIBS \$(shell pkg-config --libs glib-2.0 libconfig) -LRDMA_lib -lRDMA_lib -libverbs"
+
 
 cat << END                                                     > $NGX_MAKEFILE
 
@@ -45,7 +47,7 @@ LINK =	$LINK
 CFLAGS += -Wno-unused-function
 CFLAGS += -mssse3 
 CFLAGS += \$(shell pkg-config --cflags libconfig glib-2.0)
-CFLAGS += -IRDMA_lib/include -LRDMA_lib -lRDMA_lib -libverbs
+CFLAGS += -IRDMA_lib/include 
 CFLAGS += -I$FF_PATH/lib
 END
 
