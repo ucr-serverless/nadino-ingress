@@ -38,7 +38,7 @@ pip3 install pyelftools --upgrade
 cd palladium-ingress/f-stack/dpdk/
 meson setup -Denable_kmods=true build
 ninja -C build
-sudo ninja -C build install
+ninja -C build install
 
 # Set hugepage at system-wide (Option#1)
 sudo sysctl -w vm.nr_hugepages=16384
