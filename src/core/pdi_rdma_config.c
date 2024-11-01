@@ -7,6 +7,8 @@
 
 #define MEMPOOL_NAME "PDI_MEMPOOL"
 #define REMOTE_MEMPOOL_NAME "PDI_REMOTE_MEMPOOL"
+
+char *rdma_cfg_name;
 struct rdma_config rdma_cfg;
 
 ngx_log_t * rdma_log;
@@ -107,7 +109,8 @@ void set_node(struct rdma_config *cfg, uint8_t fn_id, uint8_t node_idx)
 {
     cfg->inter_node_rt[fn_id] = node_idx;
 }
-static int cfg_init(char *cfg_file, struct rdma_config * cfg)
+
+int rdma_cfg_init(char *cfg_file, struct rdma_config * cfg)
 {
     config_setting_t *subsubsetting = NULL;
     config_setting_t *subsetting = NULL;

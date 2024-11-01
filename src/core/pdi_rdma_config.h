@@ -15,6 +15,7 @@
  
 #define ROUTING_TABLE_SIZE 256
 #define HOSTNAME_MAX 256
+
 struct rdma_config
 {
     struct rte_mempool *mempool;
@@ -104,6 +105,8 @@ struct rdma_config
 
 extern struct rdma_config rdma_cfg;
 extern ngx_log_t * rdma_log;
+extern char * rdma_cfg_name;
 
+int rdma_cfg_init(char *cfg_file, struct rdma_config * cfg);
 void set_rdma_log(ngx_log_t * log_obj);
 #endif

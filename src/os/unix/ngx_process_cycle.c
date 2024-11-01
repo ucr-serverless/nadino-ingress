@@ -11,6 +11,7 @@
 #include <ngx_channel.h>
 
 #include "pdi_rdma.h"
+#include "pdi_rdma_config.h"
 
 static void ngx_start_worker_processes(ngx_cycle_t *cycle, ngx_int_t n,
     ngx_int_t type);
@@ -1265,6 +1266,8 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     ngx_setproctitle("rdma process");
 
     pdin_init_worker_rings(cycle);
+
+    set_rdma_log(cycle->log);
 
     // Init RDMA c6525-25g
         // 0. read cfg
