@@ -6,17 +6,16 @@
 #include <glib.h>
 #include "ib.h"
 #include "qp.h"
-#include "rdma_config.h"
 #include <rte_mempool.h>
 #include <generic/rte_spinlock.h>
 #include <rte_spinlock.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/types.h>
-#include "pdi_rdma.h"
 #include "pdi_rdma_config.h"
 
 
+#define MAX_MSG_BUF_SIZE 10240
 
 struct dummy_pkt
 {
@@ -67,7 +66,9 @@ struct connected_qp
     struct qp_res *remote_qpres;
 };
 
-int rdma_init();
+extern struct rte_mempool *message_pool;
+
+int rdma_init(struct rdma_config *cfg, struct rte_mempool *mp);
 
 int rdma_exit();
 

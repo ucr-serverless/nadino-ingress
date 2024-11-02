@@ -26,7 +26,8 @@
 #define FIND_SLOT_RETRY_MAX 3
 #define NUM_WC 20
 
-struct rdma_config* cfg = &rdma_cfg;
+struct rte_mempool *message_pool;
+struct rdma_config * cfg = &rdma_cfg;
 
 int destroy_control_server_socks(struct rdma_config* cfg)
 {
@@ -219,7 +220,7 @@ void retrieve_mempool_addresses(struct rte_mempool *mp, void **addr_list)
     rte_mempool_obj_iter(mp, save_mempool_element_address, addr_list);
 }
 
-int rdma_init()
+int rdma_init(struct rdma_config *cfg, struct rte_mempool *mp)
 {
     int ret = 0;
 
