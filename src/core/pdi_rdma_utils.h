@@ -68,12 +68,16 @@ struct connected_qp
 
 extern struct rte_mempool *message_pool;
 
+int destroy_control_server_socks(struct rdma_config* cfg);
+
+int control_server_socks_init(struct rdma_config* cfg);
+
+int exchange_rdma_info(struct rdma_config *cfg);
 int rdma_init(struct rdma_config *cfg, struct rte_mempool *mp);
 
-int rdma_exit();
+int rdma_exit(struct rdma_config *cfg);
 
-int rdma_qp_connection_init();
-
+int rdma_qp_connection_init(struct rdma_config * cfg);
 
 int rdma_two_side_node_res_init(struct ib_res *ibres, struct rdma_node_res *node_res);
 
@@ -83,8 +87,8 @@ int destroy_rdma_node_res(struct rdma_node_res *node_res);
 
 int qp_num_to_qp_res(struct rdma_node_res *res, uint32_t qp_num, struct qp_res **qpres);
 
-int rdma_two_side_rpc_client_send(int peer_node_idx, struct dummy_pkt *txn);
+int rdma_two_side_rpc_client_send(struct rdma_config * cfg, int peer_node_idx, struct dummy_pkt *txn);
 
-int rdma_two_side_rpc_server(void *arg);
+int rdma_two_side_rpc_server(struct rdma_config * cfg, void *arg);
 
 #endif // !RDMA_UTILS

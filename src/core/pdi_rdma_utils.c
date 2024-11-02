@@ -27,7 +27,6 @@
 #define NUM_WC 20
 
 struct rte_mempool *message_pool;
-struct rdma_config * cfg = &rdma_cfg;
 
 int destroy_control_server_socks(struct rdma_config* cfg)
 {
@@ -304,7 +303,7 @@ error:
     return -1;
 }
 
-int rdma_exit()
+int rdma_exit(struct rdma_config *cfg)
 {
     if (cfg->local_mempool_addrs)
     {
@@ -339,7 +338,7 @@ int rdma_exit()
     return 0;
 }
 
-int rdma_qp_connection_init_node(uint32_t remote_node_idx)
+int rdma_qp_connection_init_node(struct rdma_config* cfg, uint32_t remote_node_idx)
 {
     uint32_t node_num = cfg->n_nodes;
     uint32_t local_idx = cfg->local_node_idx;
@@ -407,7 +406,7 @@ error:
     return -1;
 }
 
-int post_two_side_srq_recv(uint32_t wr_id, void **addr)
+int post_two_side_srq_recv(struct rdma_config * cfg, uint32_t wr_id, void **addr)
 {
     int ret = 0;
     ret = rte_mempool_get(cfg->mempool, addr);
@@ -444,7 +443,7 @@ error:
     return -1;
 }
 
-int rdma_qp_connection_init()
+int rdma_qp_connection_init(struct rdma_config * cfg)
 {
     int ret = 0;
     void *addr = NULL;
@@ -456,7 +455,7 @@ int rdma_qp_connection_init()
         {
             continue;
         }
-        ret = rdma_qp_connection_init_node(i);
+        ret = rdma_qp_connection_init_node(cfg, i);
         if (ret != 0)
         {
             ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "connect qp to node: %u failed", i);
@@ -468,7 +467,7 @@ int rdma_qp_connection_init()
         for (size_t i = 0; i < MIN(cfg->rdma_ctx.srqe, 100000); i++)
         {
 
-            ret = post_two_side_srq_recv(i, &addr);
+            ret = post_two_side_srq_recv(cfg, i, &addr);
             if (unlikely(ret == -1))
             {
                 ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "pre post srq recv failed");
@@ -617,7 +616,7 @@ error:
 
 
 
-int rdma_two_side_rpc_client_send(int peer_node_idx, struct dummy_pkt *txn)
+int rdma_two_side_rpc_client_send(struct rdma_config * cfg, int peer_node_idx, struct dummy_pkt *txn)
 {
     int ret = 0;
     int num_completion;
@@ -682,7 +681,7 @@ error:
     return -1;
 }
 
-int rdma_two_side_rpc_server(void *arg)
+int rdma_two_side_rpc_server(struct rdma_config * cfg, void *arg)
 {
 
     ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "rdma_rpc_server init");
@@ -741,7 +740,7 @@ int rdma_two_side_rpc_server(void *arg)
                 ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "receive opcode %u", wc[i].opcode);
             }
 
-            ret = post_two_side_srq_recv(wr_id, &new_addr);
+            ret = post_two_side_srq_recv(cfg, wr_id, &new_addr);
             if (unlikely(ret != 0))
             {
                 ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "post srq recv failed");

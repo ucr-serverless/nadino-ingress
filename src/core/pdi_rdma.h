@@ -7,7 +7,6 @@
 
 #include "pdi_rdma_config.h"
 
-#define MAX_MSG_BUF_SIZE 10240
 struct dummy_msg *dummy_msg_alloc(void);
 void dummy_msg_free_burst(struct dummy_msg **pkts_burst, uint16_t nb_pkts);
 
