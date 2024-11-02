@@ -1277,6 +1277,9 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
         ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "read rdma cfg failed");
     }
     rdma_cfg_print(&rdma_cfg);
+    control_server_socks_init(&rdma_cfg);
+    exchange_rdma_info(&rdma_cfg);
+    rdma_qp_connection_init(&rdma_cfg);
 
 
 
