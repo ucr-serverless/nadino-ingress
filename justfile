@@ -18,3 +18,6 @@ run:
 
 log:
     sudo cat /var/log/syslog | grep "f-stack"
+
+install:
+    sudo make install

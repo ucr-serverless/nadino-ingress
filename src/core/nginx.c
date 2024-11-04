@@ -916,11 +916,13 @@ ngx_get_options(int argc, char *const *argv)
 
             case 'C':
                 if (*p) {
-                    rdma_cfg_name = (char *)p;
+                    ngx_cpystrn((unsigned char *)rdma_cfg_name, p, RDMA_CFG_NAME_MAX);
+                    printf("!!!cfg: %s", rdma_cfg_name);
                     goto next;
                 }
                 if (argv[++i]) {
-                    rdma_cfg_name = (char *) argv[i];
+                    strncpy(rdma_cfg_name, argv[i], RDMA_CFG_NAME_MAX);
+                    printf("!!!cfg: %s", rdma_cfg_name);
                     goto next;
                 }
                 ngx_log_stderr(0, "option \"-C\" requires rdma config file name");

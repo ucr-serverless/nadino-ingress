@@ -1271,6 +1271,7 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     pdin_init_worker_rings(cycle);
 
     set_rdma_log(cycle->log);
+    printf("!!!rdma_conf here: %s", rdma_cfg_name);
 
     ret = rdma_cfg_init(rdma_cfg_name, message_pool, &rdma_cfg);
     if (ret == -1) {

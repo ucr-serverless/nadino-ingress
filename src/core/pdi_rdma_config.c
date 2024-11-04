@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 
-char *rdma_cfg_name;
+char rdma_cfg_name[RDMA_CFG_NAME_MAX];
 struct rdma_config rdma_cfg;
 
 ngx_log_t * rdma_log;

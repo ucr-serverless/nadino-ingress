@@ -148,6 +148,10 @@ install:	build $NGX_INSTALL_PERL_MODULES
 		|| cp conf/nginx.conf '\$(DESTDIR)$NGX_CONF_PATH'
 	cp conf/nginx.conf '\$(DESTDIR)$NGX_CONF_PREFIX/nginx.conf.default'
 
+	test -f '\$(DESTDIR)$NGX_CONF_PATH' \\
+		|| cp conf/rdma.cfg '\$(DESTDIR)$NGX_CONF_PATH'
+	cp conf/rdma.cfg '\$(DESTDIR)$NGX_CONF_PREFIX/rdma.cfg'
+
 	test -f '\$(DESTDIR)$NGX_CONF_PREFIX/f-stack.conf' \\
 		|| cp conf/f-stack.conf '\$(DESTDIR)$NGX_CONF_PREFIX'
 
