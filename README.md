@@ -81,7 +81,6 @@ sudo make install
 cd ~/palladium-ingress/
 bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 
-# NOTE: add "-mssse3" to CFLAGS in objs/Makefile
 # For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
 
 make -j
@@ -118,3 +117,37 @@ Add file to compilation system by adding new file in `auto/sources`
 To add a new CFLAGS, just add new lines in `auto/make`
 
 To add new library, add new libraries to `CORE_LIBS` in `auto/make`
+
+## how to change the config of f-stack and nginx?
+
+First, edit the `nginx.conf`, if we wants to edit the number of worker process, we need to change the
+`worker_processes  1;` line in the `nginx.conf`
+
+Then, we need to change the `lcore_mask` value in `f-stack.conf`. If we use 3 worker process, we need to set the mask to `111`, which has same amount of `1` with the process number
+
+Afterwards, we need to edit the `port_list` the port settings.
+
+The available port can be get using dpdk's user tool.
+
+It is located under the f-stack installation folder, the relative path is `<f-stack>/dpdk/usertools/dpdk-devbind.py -s`
+
+Run the command with `python dpdk-devbind.py -s` and get the correct port number
+
+Change the port list to the port we want to use and edit the corresponding port settings.
+For example, if we want to use `port1`, then we need to add a field of `port1` and change the `addr`, `netmask`, `broadcast` and `gateway` settings accordingly.
+
+
+## How to test RDMA?
+
+First, change the `rdma.cfg` file under the `conf` directory, change the hostname of nodes setting
+
+uncomment the `/rdma` upstream in `nginx.conf` and change the upstream ip
+
+```
+        # location /rdma {
+        #     palladium_ingress http://10.10.1.2:80/;
+        # }
+```
+
+Use the `curl http://10.10.1.3:80 -v` to test the normal connection to the nginx.
+Use the `curl http://10.10.1.3:80/rdma -v` to test the connection to the rdma upstream.
