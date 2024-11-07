@@ -5,7 +5,7 @@ bear:
     bear -- make build
 
 make:
-    bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
+    bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
 
 clean:
     make clean

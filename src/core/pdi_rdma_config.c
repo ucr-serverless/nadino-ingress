@@ -1,6 +1,7 @@
 #include "pdi_rdma_config.h" 
 #include <ngx_config.h>
 #include <ngx_core.h>
+#include "ngx_log.h"
 #include "rte_errno.h"
 #include <stdlib.h>
 #include <unistd.h>
@@ -531,7 +532,7 @@ int rdma_cfg_init(char *cfg_file, struct rte_mempool *mp,  struct rdma_config * 
     setting = config_lookup(&config, "auto_scaler");
     if (unlikely(setting == NULL))
     {
-        /* TODO: Error message */
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "auto scaler config not found");
         goto error;
     }
     ret = config_setting_is_group(setting);

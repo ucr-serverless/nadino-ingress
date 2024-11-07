@@ -25,6 +25,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "ff_api.h"
 
 #include "pdi_rdma_sock.h"
 ssize_t sock_utils_read(int sock_fd, void *buffer, ssize_t len)

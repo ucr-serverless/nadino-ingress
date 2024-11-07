@@ -1271,13 +1271,13 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     pdin_init_worker_rings(cycle);
 
     set_rdma_log(cycle->log);
-    printf("!!!rdma_conf here: %s", rdma_cfg_name);
 
     ret = rdma_cfg_init(rdma_cfg_name, message_pool, &rdma_cfg);
     if (ret == -1) {
         ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "read rdma cfg failed");
     }
-    rdma_cfg_print(&rdma_cfg);
+    /* rdma_cfg_print(&rdma_cfg); */
+    rdma_log->log_level = NGX_LOG_INFO;
     control_server_socks_init(&rdma_cfg);
     exchange_rdma_info(&rdma_cfg);
     rdma_qp_connection_init(&rdma_cfg);

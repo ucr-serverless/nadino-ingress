@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "ib.h"
+#include "ngx_log.h"
 #include "rdma_config.h"
 
 
@@ -73,7 +74,7 @@ int control_server_socks_init(struct rdma_config* cfg)
         cfg->control_server_socks[i] = sock_fd;
         connected_nodes++;
     }
-    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "connected to all servers with idx lower than %d", self_idx);
+    ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "connected to all servers with idx lower than %d", self_idx);
     if (connected_nodes == node_num - 1)
     {
         return 0;
@@ -91,6 +92,7 @@ int control_server_socks_init(struct rdma_config* cfg)
     socklen_t peer_addr_len = sizeof(struct sockaddr_in);
     char client_ip[INET_ADDRSTRLEN];
     ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "accepting connections from other nodes");
+    printf("!!!start listen\n");
     while (connected_nodes < node_num - 1)
     {
         peer_fd = accept(bind_fd, (struct sockaddr *)&peer_addr, &peer_addr_len);
@@ -99,7 +101,7 @@ int control_server_socks_init(struct rdma_config* cfg)
             continue;
         }
         inet_ntop(AF_INET, &peer_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-        ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "client ip %s connected", client_ip);
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "client ip %s connected", client_ip);
         for (size_t i = self_idx + 1; i < node_num; i++)
         {
             if (strcmp(cfg->nodes[i].ip_address, client_ip) == 0)
@@ -462,6 +464,8 @@ int rdma_qp_connection_init(struct rdma_config * cfg)
             goto error;
         }
     }
+
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "rdma connection initialized");
     if (cfg->use_one_side == 0)
     {
         for (size_t i = 0; i < MIN(cfg->rdma_ctx.srqe, 100000); i++)

@@ -61,6 +61,8 @@ echo 0 > /proc/sys/kernel/randomize_va_space
 # Install the DPDK driver (igb_uio) for Intel NICs (Not needed for Mellanox NICs)
 modprobe uio
 insmod f-stack/dpdk/build/kernel/linux/igb_uio/igb_uio.ko
+
+# establish channel between DPDK and kernel stack
 insmod f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on # carrier=on is necessary, otherwise need to be up `veth0` via `echo 1 > /sys/class/net/veth0/carrier`
 
 # Bind NICs to DPDK
@@ -151,3 +153,9 @@ uncomment the `/rdma` upstream in `nginx.conf` and change the upstream ip
 
 Use the `curl http://10.10.1.3:80 -v` to test the normal connection to the nginx.
 Use the `curl http://10.10.1.3:80/rdma -v` to test the connection to the rdma upstream.
+
+## How to change log level of nginx
+
+Change the `error_log log/error.log` line in `nginx.conf` file.
+The nginx will load configuration files under `/usr/local/nginx_fstack/conf/`
+If we want debug logs, append the setting with the debug keyword, like `error_log  logs/error.log debug;`

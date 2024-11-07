@@ -69,6 +69,7 @@ cat << END                                                    >> $NGX_MAKEFILE
 
 ALL_INCS = $ngx_include_opt$ngx_incs
 
+ALL_INCS += -I f-stack/lib
 END
 
 
