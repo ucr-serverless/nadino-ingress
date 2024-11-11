@@ -3,6 +3,7 @@
 #include <ngx_core.h>
 #include <glib.h>
 #include <infiniband/verbs.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <rte_branch_prediction.h>
 #include <rte_errno.h>
@@ -11,6 +12,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -74,41 +76,48 @@ int control_server_socks_init(struct rdma_config* cfg)
         cfg->control_server_socks[i] = sock_fd;
         connected_nodes++;
     }
-    ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "connected to all servers with idx lower than %d", self_idx);
+    ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "connected to all servers with idx lower than %d", self_idx);
     if (connected_nodes == node_num - 1)
     {
         return 0;
     }
     sprintf(buffer, "%u", cfg->nodes[self_idx].control_server_port);
-    int bind_fd = sock_utils_bind(buffer);
+    int bind_fd = sock_utils_bind(cfg->nodes[self_idx].ip_address, buffer);
     if (bind_fd <= 0)
     {
         ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "failed to open listen socket");
-        return -1;
+        goto error;
     }
-    listen(bind_fd, 10);
+    ret = listen(bind_fd, 10);
+    if (ret < 0) {
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "listen failed, sockfd:%d, errno:%d, %s\n", bind_fd, errno, strerror(errno));
+        goto error;
+    }
     int peer_fd = 0;
     struct sockaddr_in peer_addr;
     socklen_t peer_addr_len = sizeof(struct sockaddr_in);
     char client_ip[INET_ADDRSTRLEN];
     ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "accepting connections from other nodes");
-    printf("!!!start listen\n");
     while (connected_nodes < node_num - 1)
     {
         peer_fd = accept(bind_fd, (struct sockaddr *)&peer_addr, &peer_addr_len);
         if (peer_fd < 0)
         {
+            ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "client connect fail");
             continue;
         }
         inet_ntop(AF_INET, &peer_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "client ip %s connected", client_ip);
+        ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "client ip %s connected", client_ip);
         for (size_t i = self_idx + 1; i < node_num; i++)
         {
             if (strcmp(cfg->nodes[i].ip_address, client_ip) == 0)
             {
                 cfg->control_server_socks[i] = peer_fd;
                 connected_nodes++;
+            } else {
+                close(peer_fd);
             }
+            
         }
     }
     cfg->control_server_socks[self_idx] = 0;
@@ -144,10 +153,15 @@ error:
 
 int exchange_rdma_info(struct rdma_config *cfg)
 {
+    ngx_log_error(NGX_LOG_CRIT, rdma_log, 0, "start exchange rdma info");
     int ret = 0;
     uint32_t local_idx = cfg->local_node_idx;
     uint32_t node_num = cfg->n_nodes;
     ret = init_local_ib_res(&(cfg->rdma_ctx), &(cfg->node_res[local_idx].ibres));
+    if (ret != RDMA_SUCCESS) {
+        ngx_log_error(NGX_LOG_CRIT, rdma_log, 0, "init local ib res failed");
+        goto error;
+    }
     for (size_t i = 0; i < node_num; i++)
     {
         if (i == local_idx)
@@ -162,31 +176,32 @@ int exchange_rdma_info(struct rdma_config *cfg)
                 ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "send res to node idx %d failed", i);
                 goto error;
             }
-            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local ibres sent to node %u", i);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local ibres sent to node %l", i);
             ret = recv_ib_res(&(cfg->node_res[i].ibres), cfg->control_server_socks[i]);
             if (ret != RDMA_SUCCESS)
             {
-                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "recv res from node idx %d failed", i);
+                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "recv res from node idx %l failed", i);
                 goto error;
             }
-            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote ibres recv from node %u", i);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote ibres recv from node %l", i);
         }
         if (i > local_idx)
         {
+            printf("here recv");
             ret = recv_ib_res(&(cfg->node_res[i].ibres), cfg->control_server_socks[i]);
             if (ret != RDMA_SUCCESS)
             {
-                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "recv res from node idx %d failed", i);
+                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "recv res from node idx %l failed", i);
                 goto error;
             }
-            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote ibres recv from node %u", i);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote ibres recv from node %l", i);
             ret = send_ib_res(&(cfg->node_res[local_idx].ibres), cfg->control_server_socks[i]);
             if (ret != RDMA_SUCCESS)
             {
-                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "send res to node idx %d failed", i);
+                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "send res to node idx %l failed", i);
                 goto error;
             }
-            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local ibres sent to node %u", i);
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local ibres sent to node %l", i);
         }
     }
     ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "finished exchange information with all nodes");
@@ -243,8 +258,8 @@ int rdma_init(struct rdma_config *cfg, struct rte_mempool *mp)
         rparams.remote_mr_size = cfg->local_mempool_elt_size;
     }
 
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local mr_size: %u", rparams.local_mr_size);
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote mr_size: %u", rparams.remote_mr_size);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "local mr_size: %l", rparams.local_mr_size);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "remote mr_size: %l", rparams.remote_mr_size);
 
     cfg->local_mempool_addrs = (void **)calloc(cfg->local_mempool_size, sizeof(void *));
     if (!cfg->local_mempool_addrs)
@@ -263,12 +278,12 @@ int rdma_init(struct rdma_config *cfg, struct rte_mempool *mp)
     }
 
     ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "init RDMA ctx finished");
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "send cqe: %u", cfg->rdma_ctx.send_cqe);
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "recv cqe: %u", cfg->rdma_ctx.recv_cqe);
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "srq qe: %u", cfg->rdma_ctx.srqe);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "send cqe: %l", cfg->rdma_ctx.send_cqe);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "recv cqe: %l", cfg->rdma_ctx.recv_cqe);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "srq qe: %l", cfg->rdma_ctx.srqe);
 
     cfg->rdma_unsignal_freq = cfg->rdma_ctx.max_send_wr / 2;
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "unsignaled freq: %u", cfg->rdma_unsignal_freq);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "unsignaled freq: %l", cfg->rdma_unsignal_freq);
 
     if (unlikely(ret != RDMA_SUCCESS))
     {
@@ -302,7 +317,9 @@ int rdma_init(struct rdma_config *cfg, struct rte_mempool *mp)
     }
     return 0;
 error:
-    return -1;
+    ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "init RDMA failed");
+    rdma_exit(cfg);
+    exit(1);
 }
 
 int rdma_exit(struct rdma_config *cfg)
@@ -380,7 +397,7 @@ int rdma_qp_connection_init_node(struct rdma_config* cfg, uint32_t remote_node_i
                                     &cfg->node_res[remote_node_idx].ibres, peer_qp_num);
         if (ret != RDMA_SUCCESS)
         {
-            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "init qp to node: %u, qp_num: %u failed", remote_node_idx, remote_qp_slot_start + i);
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "init qp to node: %l, qp_num: %l failed", remote_node_idx, remote_qp_slot_start + i);
             goto error;
         }
         local_qpres->peer_qp_id.qp_num = peer_qp_num;
@@ -398,10 +415,10 @@ int rdma_qp_connection_init_node(struct rdma_config* cfg, uint32_t remote_node_i
 
         g_array_append_val(remote_res->connected_qp_res_array, cqp);
 
-        ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "pushed connected_qp_res to node_idx: %u from qp_num: %u to %u, array size %d", remote_node_idx,
+        ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "pushed connected_qp_res to node_idx: %l from qp_num: %l to %l, array size %d", remote_node_idx,
                   cqp.local_qpres->qp_num, cqp.remote_qpres->qp_num, remote_res->connected_qp_res_array->len);
     }
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "%u RDMA_connections to node: %u established", n_qp_connect, remote_node_idx);
+    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "%l RDMA_connections to node: %l established", n_qp_connect, remote_node_idx);
     return 0;
 error:
 
@@ -429,7 +446,7 @@ int post_two_side_srq_recv(struct rdma_config * cfg, uint32_t wr_id, void **addr
         ngx_log_error(NGX_LOG_CRIT, rdma_log, 0, "looked up mr addr does not equal to mp_elt addr");
         goto error;
     }
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "get mp elt addr: %p", *addr);
+    /* ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "get mp elt addr: %p", *addr); */
     ret = post_srq_recv(cfg->rdma_ctx.srq, mr->addr, sizeof(struct dummy_pkt), mr->lkey, wr_id);
     if (unlikely(ret != RDMA_SUCCESS))
     {
@@ -460,15 +477,18 @@ int rdma_qp_connection_init(struct rdma_config * cfg)
         ret = rdma_qp_connection_init_node(cfg, i);
         if (ret != 0)
         {
-            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "connect qp to node: %u failed", i);
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "connect qp to node: %l failed", i);
             goto error;
         }
     }
 
     ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "rdma connection initialized");
+
+    size_t num_srq = MIN(cfg->rdma_ctx.srqe, cfg->mempool->size);
+    num_srq = MIN(num_srq, 1000);
     if (cfg->use_one_side == 0)
     {
-        for (size_t i = 0; i < MIN(cfg->rdma_ctx.srqe, 100000); i++)
+        for (size_t i = 0; i < num_srq; i++)
         {
 
             ret = post_two_side_srq_recv(cfg, i, &addr);
@@ -478,7 +498,7 @@ int rdma_qp_connection_init(struct rdma_config * cfg)
                 goto error;
             }
             g_hash_table_insert(cfg->node_res[local_idx].wr_to_addr, GINT_TO_POINTER(i), addr);
-            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "insert %p into map", addr);
+            /* ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "insert %p into map", addr); */
         }
         ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "post two side srq recv finished");
     }
@@ -589,7 +609,7 @@ int select_qp_rr(int peer_node_idx, struct rdma_node_res *noderes, struct connec
     ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "size of array: %d", array_size);
     if (array_size == 0)
     {
-        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "no qp connected for node: %u", peer_node_idx);
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "no qp connected for node: %l", peer_node_idx);
         goto error;
     }
     noderes->last_connected_qp_mark = (noderes->last_connected_qp_mark + 1) % array_size;
@@ -606,7 +626,7 @@ int select_qp_rand(int peer_node_idx, struct rdma_node_res *noderes, struct conn
     ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "size of array: %d", array_size);
     if (array_size == 0)
     {
-        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "no qp connected for node: %u", peer_node_idx);
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "no qp connected for node: %l", peer_node_idx);
         goto error;
     }
     noderes->last_connected_qp_mark = (noderes->last_connected_qp_mark + 1) % array_size;
@@ -702,7 +722,7 @@ int rdma_two_side_rpc_server(struct rdma_config * cfg, void *arg)
     struct ibv_wc *wc = cfg->rdma_ctx.recv_wc;
     if (unlikely(!wc))
     {
-        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "allocate %u ibv_wc failed", NUM_WC);
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "allocate %l ibv_wc failed", NUM_WC);
         return -1;
     }
     ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "rdma_rpc_server initialized");
@@ -730,18 +750,18 @@ int rdma_two_side_rpc_server(struct rdma_config * cfg, void *arg)
             {
                 if (wc[i].byte_len != sizeof(struct dummy_pkt))
                 {
-                    ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "recved len %u, not size of dummy_pkt", wc[i].byte_len);
+                    ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "recved len %l, not size of dummy_pkt", wc[i].byte_len);
                     goto error;
                 }
                 // only post less than uint32_t recv req
 
                 txn = (struct dummy_pkt *)g_hash_table_lookup(local_noderes.wr_to_addr, GINT_TO_POINTER(wr_id));
 
-                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "current wr_id is %u", wr_id);
+                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "current wr_id is %l", wr_id);
             }
             else
             {
-                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "receive opcode %u", wc[i].opcode);
+                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "receive opcode %l", wc[i].opcode);
             }
 
             ret = post_two_side_srq_recv(cfg, wr_id, &new_addr);

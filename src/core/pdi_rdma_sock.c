@@ -26,7 +26,6 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "ff_api.h"
 
 #include "pdi_rdma_sock.h"
 ssize_t sock_utils_read(int sock_fd, void *buffer, ssize_t len)
@@ -35,7 +34,7 @@ ssize_t sock_utils_read(int sock_fd, void *buffer, ssize_t len)
     char *buf = buffer; // avoid pointer arithmetic on void pointer
     tot_read = 0;
 
-    while (len != 0 && (nr = ff_read(sock_fd, buf, len)) != 0)
+    while (len != 0 && (nr = read(sock_fd, buf, len)) != 0)
     {
         if (nr < 0)
         {
@@ -63,7 +62,7 @@ ssize_t sock_utils_write(int sock_fd, void *buffer, ssize_t len)
 
     for (tot_written = 0; tot_written < len;)
     {
-        nw = ff_write(sock_fd, buf, len - tot_written);
+        nw = write(sock_fd, buf, len - tot_written);
 
         if (nw <= 0)
         {
@@ -83,7 +82,7 @@ ssize_t sock_utils_write(int sock_fd, void *buffer, ssize_t len)
     return tot_written;
 }
 
-int sock_utils_bind(char *port)
+int sock_utils_bind(char * ip, char *port)
 {
     struct addrinfo hints;
     struct addrinfo *result, *rp;
@@ -95,7 +94,7 @@ int sock_utils_bind(char *port)
     hints.ai_family = AF_UNSPEC;
     hints.ai_flags = AI_PASSIVE;
 
-    ret = getaddrinfo(NULL, port, &hints, &result);
+    ret = getaddrinfo(ip, port, &hints, &result);
     if (ret != 0)
     {
         ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Error, fail to create sock bind");
@@ -104,21 +103,25 @@ int sock_utils_bind(char *port)
 
     for (rp = result; rp != NULL; rp = rp->ai_next)
     {
-        sock_fd = ff_socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        printf("!!!before socket, ai_family: %d, ai_sock: %d, ai_proto: %d\n", rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sock_fd < 0)
         {
             continue;
         }
-
+        /* // set non-blocking according to f-stack's requirement */
+        /* int on = 1; */
+        /* ioctl(sock_fd, FIONBIO, &on); */
         // Set SO_REUSEADDR to reuse the address
-        if (ff_setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+        if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
         {
             ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "%s: set socket option(SO_REUSEADDR) failed", strerror(errno));
             close(sock_fd);
-            return -1;
+            sock_fd = -1;
+            continue;
         }
 
-        ret = ff_bind(sock_fd, (struct linux_sockaddr *)rp, rp->ai_addrlen);
+        ret = bind(sock_fd, (struct sockaddr *)rp->ai_addr, rp->ai_addrlen);
         if (ret == 0)
         {
             /* bind success */
@@ -144,7 +147,7 @@ error:
     }
     if (sock_fd > 0)
     {
-        ff_close(sock_fd);
+        close(sock_fd);
     }
     return -1;
 }
@@ -168,20 +171,22 @@ int sock_utils_connect(char *server_name, char *port)
 
     for (rp = result; rp != NULL; rp = rp->ai_next)
     {
-        sock_fd = ff_socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sock_fd == -1)
         {
             continue;
         }
 
-        ret = ff_connect(sock_fd, (struct linux_sockaddr *)rp, rp->ai_addrlen);
+        int on = 1;
+        ioctl(sock_fd, FIONBIO, &on);
+        ret = connect(sock_fd, (struct sockaddr *)rp->ai_addr, rp->ai_addrlen);
         if (ret == 0)
         {
             /* connection success */
             break;
         }
 
-        ff_close(sock_fd);
+        close(sock_fd);
         sock_fd = -1;
     }
 

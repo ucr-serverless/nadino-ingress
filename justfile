@@ -28,3 +28,6 @@ fs:
     cd f-stack/lib/
     make -j -C f-stack/lib/
     sudo make -C f-stack/lib/ install
+
+rdma:
+    make -C ./RDMA_lib/

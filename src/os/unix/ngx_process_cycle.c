@@ -10,6 +10,7 @@
 #include <ngx_event.h>
 #include <ngx_channel.h>
 
+#include "ff_api.h"
 #include "ngx_log.h"
 #include "pdi_rdma.h"
 #include "pdi_rdma_config.h"
@@ -1277,7 +1278,8 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
         ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "read rdma cfg failed");
     }
     /* rdma_cfg_print(&rdma_cfg); */
-    rdma_log->log_level = NGX_LOG_INFO;
+    rdma_log->log_level = NGX_LOG_DEBUG;
+    rdma_init(&rdma_cfg, message_pool);
     control_server_socks_init(&rdma_cfg);
     exchange_rdma_info(&rdma_cfg);
     rdma_qp_connection_init(&rdma_cfg);
