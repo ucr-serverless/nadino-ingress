@@ -18,6 +18,7 @@
 
 #include <ngx_config.h>
 #include <ngx_core.h>
+#include <ngx_log.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -34,7 +35,7 @@ ssize_t sock_utils_read(int sock_fd, void *buffer, ssize_t len)
     char *buf = buffer; // avoid pointer arithmetic on void pointer
     tot_read = 0;
 
-    while (len != 0 && (nr = read(sock_fd, buf, len)) != 0)
+    while (len != 0 && (nr = ff_read(sock_fd, buf, len)) != 0)
     {
         if (nr < 0)
         {
@@ -62,7 +63,7 @@ ssize_t sock_utils_write(int sock_fd, void *buffer, ssize_t len)
 
     for (tot_written = 0; tot_written < len;)
     {
-        nw = write(sock_fd, buf, len - tot_written);
+        nw = ff_write(sock_fd, buf, len - tot_written);
 
         if (nw <= 0)
         {
@@ -103,21 +104,21 @@ int sock_utils_bind(char *port)
 
     for (rp = result; rp != NULL; rp = rp->ai_next)
     {
-        sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        sock_fd = ff_socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sock_fd < 0)
         {
             continue;
         }
 
         // Set SO_REUSEADDR to reuse the address
-        if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+        if (ff_setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
         {
-            perror("setsockopt(SO_REUSEADDR) failed");
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "%s: set socket option(SO_REUSEADDR) failed", strerror(errno));
             close(sock_fd);
             return -1;
         }
 
-        ret = bind(sock_fd, rp->ai_addr, rp->ai_addrlen);
+        ret = ff_bind(sock_fd, (struct linux_sockaddr *)rp, rp->ai_addrlen);
         if (ret == 0)
         {
             /* bind success */
@@ -143,7 +144,7 @@ error:
     }
     if (sock_fd > 0)
     {
-        close(sock_fd);
+        ff_close(sock_fd);
     }
     return -1;
 }
@@ -167,20 +168,20 @@ int sock_utils_connect(char *server_name, char *port)
 
     for (rp = result; rp != NULL; rp = rp->ai_next)
     {
-        sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        sock_fd = ff_socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sock_fd == -1)
         {
             continue;
         }
 
-        ret = connect(sock_fd, rp->ai_addr, rp->ai_addrlen);
+        ret = ff_connect(sock_fd, (struct linux_sockaddr *)rp, rp->ai_addrlen);
         if (ret == 0)
         {
             /* connection success */
             break;
         }
 
-        close(sock_fd);
+        ff_close(sock_fd);
         sock_fd = -1;
     }
 

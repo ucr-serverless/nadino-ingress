@@ -93,6 +93,7 @@ CORE_DEPS = $ngx_deps
 
 CORE_INCS = $ngx_include_opt$ngx_incs
 
+CORE_INCS += -I f-stack/lib
 END
 
 
@@ -249,7 +250,10 @@ ngx_main_link=${MAIN_LINK:+`echo $MAIN_LINK \
 
 cat << END                                                    >> $NGX_MAKEFILE
 
-build:	binary modules manpage
+build:	binary modules manpage RDMA_lib
+
+RDMA_lib:
+	make -C .\RDMA_lib\
 
 binary:	$NGX_OBJS${ngx_dirsep}nginx$ngx_binext
 

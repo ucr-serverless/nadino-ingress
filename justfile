@@ -21,3 +21,10 @@ log:
 
 install:
     sudo make install
+
+fs:
+    export FF_PATH=~/palladium-ingress/f-stack
+    export PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig
+    cd f-stack/lib/
+    make -j -C f-stack/lib/
+    sudo make -C f-stack/lib/ install
