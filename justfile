@@ -31,3 +31,6 @@ fs:
 
 rdma:
     make -C ./RDMA_lib/
+
+init:
+    git submodule update --init --recursive
