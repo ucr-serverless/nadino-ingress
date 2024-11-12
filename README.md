@@ -29,7 +29,7 @@ conda activate ingress
 # Install build dependencies (TODO: remove unnecessary deps)
 sudo apt update && sudo apt install -y flex bison build-essential dwarves libssl-dev libelf-dev \
                     libnuma-dev pkg-config python3-pip python3-pyelftools \
-                    libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev
+                    libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev libglib2.0-dev
 
 pip3 install meson ninja
 pip3 install pyelftools --upgrade
@@ -93,7 +93,11 @@ sudo make install
 ```bash
 # Run NGINX not as a daemon
 sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
+# Run the NGINX with rdma configuration
+sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;" -C /usr/local/nginx_fstack/conf/rdma.cfg
 
+# check runtime log
+tail -f /usr/local/nginx_fstack/log/error.log
 # Print logs of NGINX
 sudo cat /var/log/syslog | grep "f-stack"
 
