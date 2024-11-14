@@ -159,6 +159,10 @@ On one node, we change the `rdma.cfg` file of `palladium_ingress`
 
 3. Then change the `device_idx`, `sgid_idx` and `ib_port` accordingly based on the result from `RDMA_lib/scripts/get_cloudlab_node_settings.py`
 
+Then we should start the `palladium_ingress` with `sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;" -C /users/songyu/palladium-ingress/conf/rdma.cfg`
+
+The `-C` parameter is the path to the configuration file.
+
 The setting of `ping_pong.c` on the other node should also be changed.
 
 We need to change the `device_idx`, `sgid_idx` and `ib_port` of the `rparams` structure in the source code and recompile.
