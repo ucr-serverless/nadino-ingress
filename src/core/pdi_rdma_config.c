@@ -1,12 +1,13 @@
 #include "pdi_rdma_config.h" 
 #include <ngx_config.h>
 #include <ngx_core.h>
+#include "ngx_log.h"
 #include "rte_errno.h"
 #include <stdlib.h>
 #include <unistd.h>
 
-#define MEMPOOL_NAME "PDI_MEMPOOL"
-#define REMOTE_MEMPOOL_NAME "PDI_REMOTE_MEMPOOL"
+
+char rdma_cfg_name[RDMA_CFG_NAME_MAX];
 struct rdma_config rdma_cfg;
 
 ngx_log_t * rdma_log;
@@ -16,7 +17,7 @@ void set_rdma_log(ngx_log_t * log_obj)
     rdma_log = log_obj;
 }
 
-static void cfg_print(struct rdma_config * cfg)
+void rdma_cfg_print(struct rdma_config * cfg)
 {
     uint8_t i;
     uint8_t j;
@@ -107,7 +108,8 @@ void set_node(struct rdma_config *cfg, uint8_t fn_id, uint8_t node_idx)
 {
     cfg->inter_node_rt[fn_id] = node_idx;
 }
-static int cfg_init(char *cfg_file, struct rdma_config * cfg)
+
+int rdma_cfg_init(char *cfg_file, struct rte_mempool *mp,  struct rdma_config * cfg)
 {
     config_setting_t *subsubsetting = NULL;
     config_setting_t *subsetting = NULL;
@@ -127,7 +129,6 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     int port;
     int weight;
 
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "size of dummy_pkt: %lu\n", sizeof(struct dummy_pkt));
 
     config_init(&config);
 
@@ -531,7 +532,7 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
     setting = config_lookup(&config, "auto_scaler");
     if (unlikely(setting == NULL))
     {
-        /* TODO: Error message */
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "auto scaler config not found");
         goto error;
     }
     ret = config_setting_is_group(setting);
@@ -599,9 +600,9 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
 
     cfg->use_one_side = value;
 
-    cfg->rdma_slot_size = sizeof(struct dummy_pkt);
+    cfg->rdma_slot_size = mp->elt_size;
 
-    cfg->rdma_remote_mr_size = sizeof(struct dummy_pkt) * 1;
+    cfg->rdma_remote_mr_size = mp->elt_size;
 
     ret = config_setting_lookup_int(setting, "mr_per_qp", &value);
     if (unlikely(ret == CONFIG_FALSE))
@@ -637,39 +638,17 @@ static int cfg_init(char *cfg_file, struct rdma_config * cfg)
         goto error;
     }
 
-    cfg->local_mempool_size = (uint32_t)value;
+    cfg->local_mempool_size = mp->size;
 
-    cfg->local_mempool_elt_size = sizeof(struct dummy_pkt);
-    /* TODO: Change "flags" argument */
-    cfg->mempool = rte_mempool_create(MEMPOOL_NAME, cfg->local_mempool_size, cfg->local_mempool_elt_size, 0, 0, NULL,
-                                      NULL, NULL, NULL, rte_socket_id(), 0);
-    if (unlikely(cfg->mempool == NULL))
-    {
-        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "rte_mempool_create() error: %s", rte_strerror(rte_errno));
-        goto error;
-    }
-
-    cfg->remote_mempool_size = cfg->nodes[cfg->local_node_idx].qp_num * cfg->rdma_remote_mr_per_qp;
+    cfg->local_mempool_elt_size = mp->elt_size;
+    cfg->mempool = mp;
+    cfg->remote_mempool_size = 0;
     cfg->remote_mempool_elt_size = cfg->rdma_remote_mr_size;
 
-    if (cfg->remote_mempool_size == 0)
-    {
-        cfg->remote_mempool = NULL;
-    }
-    else
-    {
-        cfg->remote_mempool =
-            rte_mempool_create(REMOTE_MEMPOOL_NAME, cfg->remote_mempool_size, cfg->remote_mempool_elt_size, 0, 0, NULL,
-                               NULL, NULL, NULL, rte_socket_id(), 0);
-        if (unlikely(cfg->remote_mempool == NULL))
-        {
-            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "rte_mempool_create() remote_mempool error: %s", rte_strerror(rte_errno));
-            goto error;
-        }
-    }
+    cfg->remote_mempool = NULL;
 
     config_destroy(&config);
-    cfg_print(cfg);
+    rdma_cfg_print(cfg);
     ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "cfg initialize finished\n");
 
     return 0;

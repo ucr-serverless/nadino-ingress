@@ -10,7 +10,11 @@
 #include <ngx_event.h>
 #include <ngx_channel.h>
 
+#include "ff_api.h"
+#include "ngx_log.h"
 #include "pdi_rdma.h"
+#include "pdi_rdma_config.h"
+#include "pdi_rdma_utils.h"
 
 static void ngx_start_worker_processes(ngx_cycle_t *cycle, ngx_int_t n,
     ngx_int_t type);
@@ -1256,6 +1260,7 @@ static void
 rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
 {
     ngx_int_t worker = (intptr_t) data;
+    int ret = 0;
 
     ngx_process = NGX_PROCESS_WORKER;
     ngx_worker = worker;
@@ -1265,6 +1270,30 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     ngx_setproctitle("rdma process");
 
     pdin_init_worker_rings(cycle);
+
+    set_rdma_log(cycle->log);
+
+    ret = rdma_cfg_init(rdma_cfg_name, message_pool, &rdma_cfg);
+    if (ret == -1) {
+        ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "read rdma cfg failed");
+    }
+    /* rdma_cfg_print(&rdma_cfg); */
+    rdma_log->log_level = NGX_LOG_DEBUG;
+    rdma_init(&rdma_cfg, message_pool);
+    ret = control_server_socks_init(&rdma_cfg);
+    if (unlikely(ret == -1)) {
+        ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "initialize socket connection for RDMA failed");
+    }
+    ret = exchange_rdma_info(&rdma_cfg);
+    if (unlikely(ret == -1)) {
+        ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "exchange RDMA infomation failed");
+    }
+    rdma_qp_connection_init(&rdma_cfg);
+    if (unlikely(ret == -1)) {
+        ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "RDMA connection initialized");
+    }
+
+
 
     // Init RDMA c6525-25g
         // 0. read cfg

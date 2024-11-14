@@ -10,11 +10,13 @@
 #include <rte_mempool.h>
 
 #include <libconfig.h>
-#include "pdi_rdma_utils.h"
 #include "ib.h"
  
 #define ROUTING_TABLE_SIZE 256
 #define HOSTNAME_MAX 256
+#define RDMA_CFG_NAME_MAX 1000
+
+
 struct rdma_config
 {
     struct rte_mempool *mempool;
@@ -104,6 +106,9 @@ struct rdma_config
 
 extern struct rdma_config rdma_cfg;
 extern ngx_log_t * rdma_log;
+extern char rdma_cfg_name[RDMA_CFG_NAME_MAX];
 
+void rdma_cfg_print(struct rdma_config * cfg);
+int rdma_cfg_init(char *cfg_file, struct rte_mempool *mp, struct rdma_config * cfg);
 void set_rdma_log(ngx_log_t * log_obj);
 #endif

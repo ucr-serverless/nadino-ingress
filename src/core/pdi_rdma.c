@@ -9,6 +9,8 @@
 #include <sys/un.h>
 #include <ngx_core.h>
 
+#include "pdi_rdma_utils.h"
+
 
 static int u_sockfd;
 static int worker_msg_cnt;
@@ -19,7 +21,6 @@ static int round_cnt;
 
 static struct rte_ring *ngx_worker_rx_rings[100]; // TODO: replace 100 with max num of CPU cores
 static struct rte_ring *ngx_worker_tx_rings[100]; // TODO: replace 100 with max num of CPU cores
-static struct rte_mempool *message_pool;
 #define NGX_WORKER_RING_SIZE 32
 #define DUMMY_MSG_POOL "dummy_msg_pool"
 #define MAX_PKT_BURST 16

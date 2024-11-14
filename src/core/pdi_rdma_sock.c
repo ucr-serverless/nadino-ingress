@@ -18,6 +18,7 @@
 
 #include <ngx_config.h>
 #include <ngx_core.h>
+#include <ngx_log.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -81,7 +82,7 @@ ssize_t sock_utils_write(int sock_fd, void *buffer, ssize_t len)
     return tot_written;
 }
 
-int sock_utils_bind(char *port)
+int sock_utils_bind(char * ip, char *port)
 {
     struct addrinfo hints;
     struct addrinfo *result, *rp;
@@ -93,7 +94,7 @@ int sock_utils_bind(char *port)
     hints.ai_family = AF_UNSPEC;
     hints.ai_flags = AI_PASSIVE;
 
-    ret = getaddrinfo(NULL, port, &hints, &result);
+    ret = getaddrinfo(ip, port, &hints, &result);
     if (ret != 0)
     {
         ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "Error, fail to create sock bind");
@@ -102,21 +103,25 @@ int sock_utils_bind(char *port)
 
     for (rp = result; rp != NULL; rp = rp->ai_next)
     {
+        printf("!!!before socket, ai_family: %d, ai_sock: %d, ai_proto: %d\n", rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         sock_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sock_fd < 0)
         {
             continue;
         }
-
+        /* // set non-blocking according to f-stack's requirement */
+        /* int on = 1; */
+        /* ioctl(sock_fd, FIONBIO, &on); */
         // Set SO_REUSEADDR to reuse the address
         if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
         {
-            perror("setsockopt(SO_REUSEADDR) failed");
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "%s: set socket option(SO_REUSEADDR) failed", strerror(errno));
             close(sock_fd);
-            return -1;
+            sock_fd = -1;
+            continue;
         }
 
-        ret = bind(sock_fd, rp->ai_addr, rp->ai_addrlen);
+        ret = bind(sock_fd, (struct sockaddr *)rp->ai_addr, rp->ai_addrlen);
         if (ret == 0)
         {
             /* bind success */
@@ -172,7 +177,9 @@ int sock_utils_connect(char *server_name, char *port)
             continue;
         }
 
-        ret = connect(sock_fd, rp->ai_addr, rp->ai_addrlen);
+        int on = 1;
+        ioctl(sock_fd, FIONBIO, &on);
+        ret = connect(sock_fd, (struct sockaddr *)rp->ai_addr, rp->ai_addrlen);
         if (ret == 0)
         {
             /* connection success */

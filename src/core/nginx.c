@@ -8,7 +8,8 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <nginx.h>
-
+#include "ngx_string.h"
+#include "pdi_rdma_config.h"
 
 static void ngx_show_version_info(void);
 static ngx_int_t ngx_add_inherited_sockets(ngx_cycle_t *cycle);
@@ -232,6 +233,8 @@ main(int argc, char *const *argv)
     if (ngx_get_options(argc, argv) != NGX_OK) {
         return 1;
     }
+
+    printf("rdma config file: %s\n", rdma_cfg_name);
 
     if (ngx_show_version) {
         ngx_show_version_info();
@@ -909,6 +912,20 @@ ngx_get_options(int argc, char *const *argv)
                 }
 
                 ngx_log_stderr(0, "option \"-c\" requires file name");
+                return NGX_ERROR;
+
+            case 'C':
+                if (*p) {
+                    ngx_cpystrn((unsigned char *)rdma_cfg_name, p, RDMA_CFG_NAME_MAX);
+                    printf("!!!cfg: %s", rdma_cfg_name);
+                    goto next;
+                }
+                if (argv[++i]) {
+                    strncpy(rdma_cfg_name, argv[i], RDMA_CFG_NAME_MAX);
+                    printf("!!!cfg: %s", rdma_cfg_name);
+                    goto next;
+                }
+                ngx_log_stderr(0, "option \"-C\" requires rdma config file name");
                 return NGX_ERROR;
 
             case 'g':

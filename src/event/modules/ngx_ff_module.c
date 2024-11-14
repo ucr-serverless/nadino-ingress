@@ -281,6 +281,18 @@ rdma_mod_init(const char *conf, int proc_id) {
         rte_exit(EXIT_FAILURE, "Error with EAL initialization\n");
     }
 
+    /* ret = ff_freebsd_init(); */
+    /* if (ret < 0) { */
+    /*     exit(1); */
+    /* } */
+
+
+
+    for (i = 0; i < ff_argc; i++) {
+        free(ff_argv[i]);
+    }
+
+    free(ff_argv);
     return 0;
 }
 

@@ -29,7 +29,7 @@ conda activate ingress
 # Install build dependencies (TODO: remove unnecessary deps)
 sudo apt update && sudo apt install -y flex bison build-essential dwarves libssl-dev libelf-dev \
                     libnuma-dev pkg-config python3-pip python3-pyelftools \
-                    libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev
+                    libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev libglib2.0-dev
 
 pip3 install meson ninja
 pip3 install pyelftools --upgrade
@@ -61,6 +61,8 @@ echo 0 > /proc/sys/kernel/randomize_va_space
 # Install the DPDK driver (igb_uio) for Intel NICs (Not needed for Mellanox NICs)
 modprobe uio
 insmod f-stack/dpdk/build/kernel/linux/igb_uio/igb_uio.ko
+
+# establish channel between DPDK and kernel stack
 insmod f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on # carrier=on is necessary, otherwise need to be up `veth0` via `echo 1 > /sys/class/net/veth0/carrier`
 
 # Bind NICs to DPDK
@@ -81,7 +83,6 @@ sudo make install
 cd ~/palladium-ingress/
 bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 
-# NOTE: add "-mssse3" to CFLAGS in objs/Makefile
 # For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
 
 make -j
@@ -92,7 +93,11 @@ sudo make install
 ```bash
 # Run NGINX not as a daemon
 sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
+# Run the NGINX with rdma configuration
+sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;" -C /usr/local/nginx_fstack/conf/rdma.cfg
 
+# check runtime log
+tail -f /usr/local/nginx_fstack/log/error.log
 # Print logs of NGINX
 sudo cat /var/log/syslog | grep "f-stack"
 
@@ -118,3 +123,78 @@ Add file to compilation system by adding new file in `auto/sources`
 To add a new CFLAGS, just add new lines in `auto/make`
 
 To add new library, add new libraries to `CORE_LIBS` in `auto/make`
+
+## how to change the config of f-stack and nginx?
+
+First, edit the `nginx.conf`, if we wants to edit the number of worker process, we need to change the
+`worker_processes  1;` line in the `nginx.conf`
+
+Then, we need to change the `lcore_mask` value in `f-stack.conf`. If we use 3 worker process, we need to set the mask to `111`, which has same amount of `1` with the process number
+
+Afterwards, we need to edit the `port_list` the port settings.
+
+The available port can be get using dpdk's user tool.
+
+It is located under the f-stack installation folder, the relative path is `<f-stack>/dpdk/usertools/dpdk-devbind.py -s`
+
+Run the command with `python dpdk-devbind.py -s` and get the correct port number
+
+Change the port list to the port we want to use and edit the corresponding port settings.
+For example, if we want to use `port1`, then we need to add a field of `port1` and change the `addr`, `netmask`, `broadcast` and `gateway` settings accordingly.
+
+
+## How to test RDMA?
+
+We can run the `palladium_ingress` as a RDMA server on one node and the ping_pong client on the other node and let them establish connection.
+
+On one node, we change the `rdma.cfg` file of `palladium_ingress`
+1. Change the hostname of the two node involved. The `palladium_ingress` should be node 0 and the client should be node 1.
+
+2. Change the IP address of the two nodes. The ip address and the `contro_server_port` will be used to create TCP socket connection, which will be used by RDMA to change out of band information  to establish connection.
+
+
+**NOTE: The IP address should be change to a different address which the f-stack occupies.**
+
+**NOTE: The IP address of two nodes should be in the same subnet.**
+
+3. Then change the `device_idx`, `sgid_idx` and `ib_port` accordingly based on the result from `RDMA_lib/scripts/get_cloudlab_node_settings.py`
+
+Then we should start the `palladium_ingress` with `sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;" -C /users/songyu/palladium-ingress/conf/rdma.cfg`
+
+The `-C` parameter is the path to the configuration file.
+
+The setting of `ping_pong.c` on the other node should also be changed.
+
+We need to change the `device_idx`, `sgid_idx` and `ib_port` of the `rparams` structure in the source code and recompile.
+
+The `ping_pong.c` is located under RDMA_lib. To recompile the source, we can issue `make -C ./RDMA_lib` under `palladium_ingress` directory
+
+And launch the program with like `./ping_pong --local_ip 128.110.218.172 --port 8085 --server_ip 128.110.218.164`
+
+The `local_ip` is the IP of the ping_pong client we want to use.
+
+The `server_ip` is the IP address of the `palladium_ingress` server.
+
+**NOTE: the local_ip and server_ip should be the same in the `rdma.cfg`** file on the other machine**
+
+If the RDMA connection is established, we should see the `1 RDMA_connections to node: 1 established` log in the log file of `palladium_ingress`.(`/usr/local/nginx_fstack/logs/error.log`)
+
+On the ping_pong client side, we should see the `wait for incoming request` on the screen.
+
+WIP: simple echo server is under development
+uncomment the `/rdma` upstream in `nginx.conf` and change the upstream ip
+
+```
+        # location /rdma {
+        #     palladium_ingress http://10.10.1.2:80/;
+        # }
+```
+
+Use the `curl http://10.10.1.3:80 -v` to test the normal connection to the nginx.
+Use the `curl http://10.10.1.3:80/rdma -v` to test the connection to the rdma upstream.
+
+## How to change log level of nginx
+
+Change the `error_log log/error.log` line in `nginx.conf` file.
+The nginx will load configuration files under `/usr/local/nginx_fstack/conf/`
+If we want debug logs, append the setting with the debug keyword, like `error_log  logs/error.log debug;`
