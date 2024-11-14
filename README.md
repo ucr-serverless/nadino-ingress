@@ -145,14 +145,39 @@ For example, if we want to use `port1`, then we need to add a field of `port1` a
 
 ## How to test RDMA?
 
-First, change the `rdma.cfg` file under the `conf` directory, change the hostname of nodes setting
+We can run the `palladium_ingress` as a RDMA server on one node and the ping_pong client on the other node and let them establish connection.
 
-The ip address and the `contro_server_port` will be used to create TCP socket connection, which will be used by RDMA to change out of band information  to establish connection.
+On one node, we change the `rdma.cfg` file of `palladium_ingress`
+1. Change the hostname of the two node involved. The `palladium_ingress` should be node 0 and the client should be node 1.
 
-The IP address should be change to a different address which the f-stack occupies.
+2. Change the IP address of the two nodes. The ip address and the `contro_server_port` will be used to create TCP socket connection, which will be used by RDMA to change out of band information  to establish connection.
 
-Then change the `device_idx`, `sgid_idx` and `ib_port` accordingly based on the result from `RDMA_lib/scripts/get_cloudlab_node_settings.py`
 
+**NOTE: The IP address should be change to a different address which the f-stack occupies.**
+
+**NOTE: The IP address of two nodes should be in the same subnet.**
+
+3. Then change the `device_idx`, `sgid_idx` and `ib_port` accordingly based on the result from `RDMA_lib/scripts/get_cloudlab_node_settings.py`
+
+The setting of `ping_pong.c` on the other node should also be changed.
+
+We need to change the `device_idx`, `sgid_idx` and `ib_port` of the `rparams` structure in the source code and recompile.
+
+The `ping_pong.c` is located under RDMA_lib. To recompile the source, we can issue `make -C ./RDMA_lib` under `palladium_ingress` directory
+
+And launch the program with like `./ping_pong --local_ip 128.110.218.172 --port 8085 --server_ip 128.110.218.164`
+
+The `local_ip` is the IP of the ping_pong client we want to use.
+
+The `server_ip` is the IP address of the `palladium_ingress` server.
+
+**NOTE: the local_ip and server_ip should be the same in the `rdma.cfg`** file on the other machine**
+
+If the RDMA connection is established, we should see the `1 RDMA_connections to node: 1 established` log in the log file of `palladium_ingress`.(`/usr/local/nginx_fstack/logs/error.log`)
+
+On the ping_pong client side, we should see the `wait for incoming request` on the screen.
+
+WIP: simple echo server is under development
 uncomment the `/rdma` upstream in `nginx.conf` and change the upstream ip
 
 ```
