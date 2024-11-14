@@ -147,6 +147,12 @@ For example, if we want to use `port1`, then we need to add a field of `port1` a
 
 First, change the `rdma.cfg` file under the `conf` directory, change the hostname of nodes setting
 
+The ip address and the `contro_server_port` will be used to create TCP socket connection, which will be used by RDMA to change out of band information  to establish connection.
+
+The IP address should be change to a different address which the f-stack occupies.
+
+Then change the `device_idx`, `sgid_idx` and `ib_port` accordingly based on the result from `RDMA_lib/scripts/get_cloudlab_node_settings.py`
+
 uncomment the `/rdma` upstream in `nginx.conf` and change the upstream ip
 
 ```

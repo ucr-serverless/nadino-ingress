@@ -1280,9 +1280,18 @@ rdma_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     /* rdma_cfg_print(&rdma_cfg); */
     rdma_log->log_level = NGX_LOG_DEBUG;
     rdma_init(&rdma_cfg, message_pool);
-    control_server_socks_init(&rdma_cfg);
-    exchange_rdma_info(&rdma_cfg);
+    ret = control_server_socks_init(&rdma_cfg);
+    if (unlikely(ret == -1)) {
+        ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "initialize socket connection for RDMA failed");
+    }
+    ret = exchange_rdma_info(&rdma_cfg);
+    if (unlikely(ret == -1)) {
+        ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "exchange RDMA infomation failed");
+    }
     rdma_qp_connection_init(&rdma_cfg);
+    if (unlikely(ret == -1)) {
+        ngx_log_error(NGX_LOG_CRIT, cycle->log, 0, "RDMA connection initialized");
+    }
 
 
 
