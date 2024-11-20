@@ -536,6 +536,7 @@ ngx_http_upstream_init(ngx_http_request_t *r)
     if (ngx_event_flags & NGX_USE_CLEAR_EVENT) {
 
         if (!c->write->active) {
+            printf("============================ ADDING C WRITE EVENT\n");
             if (ngx_add_event(c->write, NGX_WRITE_EVENT, NGX_CLEAR_EVENT)
                 == NGX_ERROR)
             {
@@ -1273,6 +1274,7 @@ failed:
 static void
 ngx_http_upstream_handler(ngx_event_t *ev)
 {
+    printf("!!!!!!!!!! %s is called\n", __func__);
     ngx_connection_t     *c;
     ngx_http_request_t   *r;
     ngx_http_upstream_t  *u;
@@ -1294,6 +1296,7 @@ ngx_http_upstream_handler(ngx_event_t *ev)
     }
 
     if (ev->write) {
+        printf("!!!!!!!!!! %s is calling  u->write_event_handler(r, u);\n", __func__);
         u->write_event_handler(r, u);
 
     } else {
@@ -1585,6 +1588,8 @@ ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
 
     c->data = r;
 
+    printf("Addr of ngx_http_upstream_handler: %p\n", ngx_http_upstream_handler);
+
     c->write->handler = ngx_http_upstream_handler;
     c->read->handler = ngx_http_upstream_handler;
 
@@ -1663,6 +1668,7 @@ ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
     u->request_body_blocked = 0;
 
     if (rc == NGX_AGAIN) {
+        printf("-------------- Try to add timer for c write\n");
         ngx_add_timer(c->write, u->conf->connect_timeout);
         return;
     }
@@ -2080,6 +2086,7 @@ static void
 ngx_http_upstream_send_request(ngx_http_request_t *r, ngx_http_upstream_t *u,
     ngx_uint_t do_write)
 {
+    printf("!!!!!!!!!! %s is called\n", __func__);
     ngx_int_t          rc;
     ngx_connection_t  *c;
 
@@ -2323,6 +2330,7 @@ static void
 ngx_http_upstream_send_request_handler(ngx_http_request_t *r,
     ngx_http_upstream_t *u)
 {
+    printf("!!!!!!!!!! %s is called\n", __func__);
     ngx_connection_t  *c;
 
     c = u->peer.connection;
@@ -2351,7 +2359,7 @@ ngx_http_upstream_send_request_handler(ngx_http_request_t *r,
 
         return;
     }
-
+printf("!!!!!!!!!! %s is calling ngx_http_upstream_send_request(r, u, 1);\n", __func__);
     ngx_http_upstream_send_request(r, u, 1);
 }
 
@@ -2359,6 +2367,7 @@ ngx_http_upstream_send_request_handler(ngx_http_request_t *r,
 static void
 ngx_http_upstream_read_request_handler(ngx_http_request_t *r)
 {
+    printf("!!!!!!!!!! %s is called\n", __func__);
     ngx_connection_t     *c;
     ngx_http_upstream_t  *u;
 
@@ -4328,6 +4337,7 @@ ngx_http_upstream_store(ngx_http_request_t *r, ngx_http_upstream_t *u)
 static void
 ngx_http_upstream_dummy_handler(ngx_http_request_t *r, ngx_http_upstream_t *u)
 {
+    printf("!!!!!!!!!! %s is called\n", __func__);
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "http upstream dummy handler");
 }

@@ -166,7 +166,7 @@ pdin_rdma_tx_mgr(ngx_int_t proc_id, struct dummy_msg **pkts_burst)
 
     for (i = 0; i < nb_rb; i++) {
         // handle_msg((struct dummy_msg *)pkts_burst[i], proc_id);
-        printf("RDMA backend receives: %s\n", pkts_burst[i]->buf_addr);
+        // printf("RDMA backend receives: %s\n", pkts_burst[i]->buf_addr);
 
         snprintf(message, 100, "I'm RDMA backend. Thank you for sharing message %d", i);
         strcpy(pkts_burst[i]->buf_addr, message);
