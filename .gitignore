@@ -2,3 +2,5 @@ objs/
 Makefile
 compile_commands.json
 .cache/
+MLNX_OFED_LINUX*/
+ofed.tgz
