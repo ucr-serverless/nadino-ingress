@@ -28,9 +28,12 @@ fs:
     cd f-stack/lib/
     make -j -C f-stack/lib/
     sudo make -C f-stack/lib/ install
+    cd ../..
 
 rdma:
     make -C ./RDMA_lib/
 
 init:
     git submodule update --init --recursive
+    cd RDMA_lib
+    git checkout main
