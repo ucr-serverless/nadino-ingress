@@ -1,7 +1,7 @@
 # Palladium Ingress
 
 ## Testbed
-Existing build has been tested on c220g* nodes on Cloudlab Wisc, using 
+Existing build has been tested on `c220g*` nodes on Cloudlab Wisc, using 
 Ubuntu 22.04 with kernel 5.15.
 Note: F-stack works with Intel NICs using `igb_uio` driver.
 
@@ -133,11 +133,11 @@ Then, we need to change the `lcore_mask` value in `f-stack.conf`. If we use 3 wo
 
 Afterwards, we need to edit the `port_list` the port settings.
 
-The available port can be get using dpdk's user tool.
+The available port can be found using dpdk's user tool.
 
-It is located under the f-stack installation folder, the relative path is `<f-stack>/dpdk/usertools/dpdk-devbind.py -s`
+It is located under the f-stack installation folder, the relative path is `<f-stack>/dpdk/usertools/dpdk-devbind.py`
 
-Run the command with `python dpdk-devbind.py -s` and get the correct port number
+Run the command with `python dpdk-devbind.py -s` and get the correct port number(index of the network interface in the result)
 
 Change the port list to the port we want to use and edit the corresponding port settings.
 For example, if we want to use `port1`, then we need to add a field of `port1` and change the `addr`, `netmask`, `broadcast` and `gateway` settings accordingly.
@@ -145,12 +145,12 @@ For example, if we want to use `port1`, then we need to add a field of `port1` a
 
 ## How to test RDMA?
 
-We can run the `palladium_ingress` as a RDMA server on one node and the ping_pong client on the other node and let them establish connection.
+We can run the `palladium_ingress` as a RDMA server on one node and the `ping_pong` client on the other node and let them establish connection.
 
-On one node, we change the `rdma.cfg` file of `palladium_ingress`
+On one node, we change the `rdma.cfg` file of `palladium_ingress`.
 1. Change the hostname of the two node involved. The `palladium_ingress` should be node 0 and the client should be node 1.
 
-2. Change the IP address of the two nodes. The ip address and the `contro_server_port` will be used to create TCP socket connection, which will be used by RDMA to change out of band information  to establish connection.
+2. Change the IP address of the two nodes. The ip address and the `contro_server_port` will be used to create TCP socket connection, which will be used by RDMA for exchanging out of band information to establish RDMA connection.
 
 
 **NOTE: The IP address should be change to a different address which the f-stack occupies.**
@@ -159,14 +159,16 @@ On one node, we change the `rdma.cfg` file of `palladium_ingress`
 
 3. Then change the `device_idx`, `sgid_idx` and `ib_port` accordingly based on the result from `RDMA_lib/scripts/get_cloudlab_node_settings.py`
 
+
 Then we should start the `palladium_ingress` with `sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;" -C /users/songyu/palladium-ingress/conf/rdma.cfg`
 
-The `-C` parameter is the path to the configuration file.
+Specifically, there are some rdma configuration files for some node type on cloudlab. For example, `rdma_xl170.cfg`. For these files, only the ip address need to be changed.
+
+The `-C` parameter is the path to the RDMA configuration file.
 
 The setting of `ping_pong.c` on the other node should also be changed.
 
 We need to change the `device_idx`, `sgid_idx` and `ib_port` of the `rparams` structure in the source code and recompile.
-
 The `ping_pong.c` is located under RDMA_lib. To recompile the source, we can issue `make -C ./RDMA_lib` under `palladium_ingress` directory
 
 And launch the program with like `./ping_pong --local_ip 128.110.218.172 --port 8085 --server_ip 128.110.218.164`
