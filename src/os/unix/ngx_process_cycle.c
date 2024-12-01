@@ -1227,7 +1227,7 @@ rdma_worker_process_cycle_loop(void *arg)
 
     // rdma_process_events_and_timers(cycle);
 
-    (void) pdin_test_rdma_worker_bounce(cycle);
+    (void) pdin_test_rdma_worker_bounce(cycle, &rdma_cfg);
 
     if (ngx_terminate) {
         ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "exiting");

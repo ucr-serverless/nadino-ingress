@@ -27,7 +27,6 @@
 #include "pdi_rdma_config.h"
 
 #define FIND_SLOT_RETRY_MAX 3
-#define NUM_WC 20
 
 struct rte_mempool *message_pool;
 
@@ -247,8 +246,8 @@ int rdma_init(struct rdma_config *cfg, struct rte_mempool *mp)
         .ib_port = cfg->nodes[cfg->local_node_idx].ib_port,
         .init_cqe_num = cfg->rdma_init_cqe_num,
         .max_send_wr = cfg->rdma_max_send_wr,
-        .n_send_wc = NUM_WC,
-        .n_recv_wc = NUM_WC,
+        .n_send_wc = MAX_PKT_BURST,
+        .n_recv_wc = MAX_PKT_BURST,
     };
     if (cfg->use_one_side == 0)
     {
@@ -640,7 +639,15 @@ error:
 
 
 
-int rdma_two_side_rpc_client_send(struct rdma_config * cfg, int peer_node_idx, struct dummy_pkt *txn)
+/**
+ * @brief send packet at txn to peer_node_idx.
+ *
+ * @param cfg the rdma_config structure.
+ * @param peer_node_idx the idx of the destination node
+ * @param txn the pointer to the pkt to be sent, the pkt should be in the mempool and the address is the address of the mempool element.
+ * @return -1 is error state, 0 is success
+ */
+int rdma_send(struct rdma_config * cfg, int peer_node_idx, struct dummy_pkt *txn)
 {
     int ret = 0;
     int num_completion;
@@ -669,6 +676,7 @@ int rdma_two_side_rpc_client_send(struct rdma_config * cfg, int peer_node_idx, s
     /* txn->rdma_recv_node_idx = peer_node_idx; */
     /* txn->rdma_recv_qp_num = local_qpres->peer_qp_id.qp_num; */
 
+    // force a completion when we have already sent out unsignaled_cnt requests
     if (local_qpres->unsignaled_cnt == cfg->rdma_unsignal_freq)
     {
         ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "post write imm signaled");
@@ -676,7 +684,7 @@ int rdma_two_side_rpc_client_send(struct rdma_config * cfg, int peer_node_idx, s
         local_qpres->unsignaled_cnt = 0;
         do
         {
-            num_completion = ibv_poll_cq(cfg->rdma_ctx.send_cq, NUM_WC, cfg->rdma_ctx.send_wc);
+            num_completion = ibv_poll_cq(cfg->rdma_ctx.send_cq, MAX_PKT_BURST, cfg->rdma_ctx.send_wc);
         } while (num_completion == 0);
         if (unlikely(num_completion < 0))
         {
@@ -701,85 +709,88 @@ int rdma_two_side_rpc_client_send(struct rdma_config * cfg, int peer_node_idx, s
     ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "peer_node_idx: %d \t sizeof(*txn): %ld", peer_node_idx, sizeof(*txn));
     ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "rpc_client_send is done.");
     return 0;
+
 error:
     return -1;
 }
 
-int rdma_two_side_rpc_server(struct rdma_config * cfg, void *arg)
+/**
+ * @brief recv packets, each packets is stored as one element in the shared memory.
+ *
+ * @param cfg the rdma_config structure.
+ * @param pkt_ptrs a list of void pointers to hold the pointer to the received packets, the values will be either NULL or a pointer to a shared memory element. The caller should iterate the first pkt_ptrs_len element and judge if it is NULL to get the pointer.
+ * @param pkt_ptrs_len a pointer points to the length of the pkt_ptrs list. When passed in, it holds the length of pkt_ptrs, which should be larger then the MAX_PKT_BURST. After the function call, it will be set to the length of ptr received.
+ * @return -1 is error state, else are the number of received pkts
+ */
+int rdma_recv(struct rdma_config * cfg, void** pkt_ptrs, size_t pkt_ptrs_len)
 {
+    assert(pkt_ptrs_len >= MAX_PKT_BURST);
 
     ngx_log_error(NGX_LOG_INFO, rdma_log, 0, "rdma_rpc_server init");
     int n_events;
     int i;
     struct dummy_pkt *txn = NULL;
-    int *pipefd_dispacher = (int *)arg;
-    ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "pipe fd", pipefd_dispacher[1]);
     int ret = 0;
     uint32_t wr_id = 0;
     void *new_addr = NULL;
+
     struct rdma_node_res local_noderes = cfg->node_res[cfg->local_node_idx];
 
     struct ibv_wc *wc = cfg->rdma_ctx.recv_wc;
     if (unlikely(!wc))
     {
-        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "allocate %l ibv_wc failed", NUM_WC);
-        return -1;
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "allocate %l ibv_wc failed", MAX_PKT_BURST);
+        goto error;
     }
     ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "rdma_rpc_server initialized");
 
-    while (1)
+    n_events = ibv_poll_cq(cfg->rdma_ctx.recv_cq, MAX_PKT_BURST, wc);
+    if (unlikely(n_events < 0))
     {
-        n_events = ibv_poll_cq(cfg->rdma_ctx.recv_cq, NUM_WC, wc);
-        if (unlikely(n_events < 0))
+        ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "failed to poll cq");
+        goto error;
+    }
+    for (i = 0; i < n_events; i++)
+    {
+
+        ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "Receiving from PEER GW.");
+        if (wc[i].status != IBV_WC_SUCCESS)
         {
-            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "failed to poll cq");
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "wc failed status: %s.", ibv_wc_status_str(wc[i].status));
             goto error;
         }
-        for (i = 0; i < n_events; i++)
+
+        wr_id = wc[i].wr_id;
+        if (wc[i].opcode == IBV_WC_RECV)
         {
+            /* if (wc[i].byte_len != sizeof(struct dummy_pkt)) */
+            /* { */
+            /*     ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "recved len %l, not size of dummy_pkt", wc[i].byte_len); */
+            /*     goto error; */
+            /* } */
 
-            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "Receiving from PEER GW.");
-            if (wc[i].status != IBV_WC_SUCCESS)
-            {
-                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "wc failed status: %s.", ibv_wc_status_str(wc[i].status));
-                goto error;
-            }
+            txn = (struct dummy_pkt *)g_hash_table_lookup(local_noderes.wr_to_addr, GINT_TO_POINTER(wr_id));
 
-            wr_id = wc[i].wr_id;
-            if (wc[i].opcode == IBV_WC_RECV)
-            {
-                if (wc[i].byte_len != sizeof(struct dummy_pkt))
-                {
-                    ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "recved len %l, not size of dummy_pkt", wc[i].byte_len);
-                    goto error;
-                }
-                // only post less than uint32_t recv req
+            pkt_ptrs[i] = txn;
 
-                txn = (struct dummy_pkt *)g_hash_table_lookup(local_noderes.wr_to_addr, GINT_TO_POINTER(wr_id));
-
-                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "current wr_id is %l", wr_id);
-            }
-            else
-            {
-                ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "receive opcode %l", wc[i].opcode);
-            }
-
-            ret = post_two_side_srq_recv(cfg, wr_id, &new_addr);
-            if (unlikely(ret != 0))
-            {
-                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "post srq recv failed");
-                goto error;
-            }
-            g_hash_table_insert(local_noderes.wr_to_addr, GINT_TO_POINTER(wr_id), new_addr);
-
-            ssize_t bytes_written = write(pipefd_dispacher[1], &txn, sizeof(struct dummy_pkt *));
-            if (unlikely(bytes_written == -1))
-            {
-                ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "write() error: %s", strerror(errno));
-                goto error;
-            }
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "current wr_id is %l", wr_id);
         }
+        else
+        {
+            ngx_log_error(NGX_LOG_DEBUG, rdma_log, 0, "receive opcode %l", wc[i].opcode);
+            pkt_ptrs[i] = NULL;
+        }
+
+        ret = post_two_side_srq_recv(cfg, wr_id, &new_addr);
+        if (unlikely(ret != 0))
+        {
+            ngx_log_error(NGX_LOG_ERR, rdma_log, 0, "post srq recv failed");
+            goto error;
+        }
+        g_hash_table_insert(local_noderes.wr_to_addr, GINT_TO_POINTER(wr_id), new_addr);
+
     }
+    return n_events;
 
 error:
     return -1;

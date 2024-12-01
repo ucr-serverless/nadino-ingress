@@ -1,3 +1,4 @@
+#include <rte_branch_prediction.h>
 #include <stdio.h>
 
 #include <ngx_config.h>
@@ -9,7 +10,9 @@
 #include <sys/un.h>
 #include <ngx_core.h>
 
-#include "pdi_rdma_utils.h"
+#include "ngx_log.h"
+#include "ngx_palloc.h"
+#include "pdi_rdma_config.h"
 
 
 static int u_sockfd;
@@ -23,7 +26,6 @@ static struct rte_ring *ngx_worker_rx_rings[100]; // TODO: replace 100 with max 
 static struct rte_ring *ngx_worker_tx_rings[100]; // TODO: replace 100 with max num of CPU cores
 #define NGX_WORKER_RING_SIZE 32
 #define DUMMY_MSG_POOL "dummy_msg_pool"
-#define MAX_PKT_BURST 16
 
 
 /* Note: can be integrated with ff_msg
@@ -334,27 +336,54 @@ pdin_test_ngx_worker_rx()
     }
 }
 
+// assume we only have one rdma backend
 void
-pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle)
+dummy_pdi_rdma_dispath(void **rx_pkts, size_t rx_pkts_len, void **pkts_burst, size_t *num_rx_pkts)
+{
+    for (size_t i = 0; i < rx_pkts_len; i++) {
+        if (rx_pkts[i]) {
+            pkts_burst[0 * MAX_PKT_BURST + i] = rx_pkts[i];
+            num_rx_pkts[0]++;
+        }
+    }
+}
+
+void
+pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle, struct rdma_config *rdma_cfg)
 {
     // receive_message_from_worker();
 
     // printf("##### Run rdma_worker process_cycle_loop #####\n");
     // ngx_msleep(1000);
 
+    int ret = 0;
     ngx_core_conf_t *ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
     struct dummy_msg *pkts_burst[ccf->worker_processes][MAX_PKT_BURST];
+    void *rx_pkts[MAX_PKT_BURST];
+    size_t num_rx_pkts[ccf->worker_processes];
     
     int i;
     for (i = 0; i < ccf->worker_processes; i++) {
         //TODO: poll NGINX workers' TX ring to see any message
         int nb_pkts = pdin_rdma_tx_mgr(i, pkts_burst[i]);
 
+
         //TODO: Send msg to serverless functions
+        for (int j = 0; j < nb_pkts; j++) {
+            ret = rdma_send(rdma_cfg, 1, (struct dummy_pkt*)pkts_burst[i][j]);
+            if (unlikely(ret != 0)) {
+                ngx_log_error(NGX_LOG_ERR, cycle->log, 0, "send pkt j from worker i failed");
+            }
+        }
 
         //TODO: Recv msg from serverless functions
-
+        
         //TODO: Write msg to NGINX worker's RX ring.
-        pdin_rdma_rx_mgr(i, pkts_burst[i], nb_pkts);
+    }
+    ret = rdma_recv(rdma_cfg, rx_pkts, MAX_PKT_BURST);
+    dummy_pdi_rdma_dispath(rx_pkts, MAX_PKT_BURST, (void **)pkts_burst, num_rx_pkts);
+    memset(num_rx_pkts, 0, sizeof(size_t) * ccf->worker_processes);
+    for (i = 0; i < ccf->worker_processes; i++) {
+        pdin_rdma_rx_mgr(i, pkts_burst[i], num_rx_pkts[i]);
     }
 }

@@ -15,7 +15,8 @@
 #define ROUTING_TABLE_SIZE 256
 #define HOSTNAME_MAX 256
 #define RDMA_CFG_NAME_MAX 1000
-
+#define NUM_WC 20
+#define MAX_PKT_BURST 16
 
 struct rdma_config
 {

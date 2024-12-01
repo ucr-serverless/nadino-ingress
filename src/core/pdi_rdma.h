@@ -6,6 +6,7 @@
 #include <rte_mempool.h>
 
 #include "pdi_rdma_config.h"
+#include "pdi_rdma_utils.h"
 
 struct dummy_msg *dummy_msg_alloc(void);
 void dummy_msg_free_burst(struct dummy_msg **pkts_burst, uint16_t nb_pkts);
@@ -22,4 +23,4 @@ void ud_sock_receive_message_from_worker();
 
 void pdin_test_ngx_worker_tx(void);
 void pdin_test_ngx_worker_rx(void);
-void pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle);
+void pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle, struct rdma_config *rdma_cfg);

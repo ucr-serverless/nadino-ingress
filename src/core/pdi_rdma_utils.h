@@ -14,7 +14,6 @@
 #include <sys/types.h>
 #include "pdi_rdma_config.h"
 
-
 #define MAX_MSG_BUF_SIZE 10240
 
 struct dummy_pkt
@@ -87,8 +86,8 @@ int destroy_rdma_node_res(struct rdma_node_res *node_res);
 
 int qp_num_to_qp_res(struct rdma_node_res *res, uint32_t qp_num, struct qp_res **qpres);
 
-int rdma_two_side_rpc_client_send(struct rdma_config * cfg, int peer_node_idx, struct dummy_pkt *txn);
+int rdma_send(struct rdma_config * cfg, int peer_node_idx, struct dummy_pkt *txn);
 
-int rdma_two_side_rpc_server(struct rdma_config * cfg, void *arg);
+int rdma_recv(struct rdma_config * cfg, void** pkt_ptrs, size_t pkt_ptrs_len);
 
 #endif // !RDMA_UTILS
