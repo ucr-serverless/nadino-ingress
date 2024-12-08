@@ -1,4 +1,5 @@
 #include <rte_branch_prediction.h>
+#include <rte_mempool.h>
 #include <stdio.h>
 
 #include <ngx_config.h>
@@ -13,6 +14,7 @@
 #include "ngx_log.h"
 #include "ngx_palloc.h"
 #include "pdi_rdma_config.h"
+#include "pdi_rdma_utils.h"
 
 
 static int u_sockfd;
@@ -353,7 +355,7 @@ pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle, struct rdma_config *rdma_cfg)
 {
     // receive_message_from_worker();
 
-    // printf("##### Run rdma_worker process_cycle_loop #####\n");
+    printf("##### Run rdma_worker process_cycle_loop #####\n");
     // ngx_msleep(1000);
 
     int ret = 0;
@@ -367,7 +369,11 @@ pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle, struct rdma_config *rdma_cfg)
         //TODO: poll NGINX workers' TX ring to see any message
         int nb_pkts = pdin_rdma_tx_mgr(i, pkts_burst[i]);
 
+        void* pkt = NULL;
 
+        rte_mempool_get(message_pool, &pkt);
+        strcpy(pkt, "hello world");
+        rdma_send(rdma_cfg, 1, (struct dummy_pkt*)pkt);
         //TODO: Send msg to serverless functions
         for (int j = 0; j < nb_pkts; j++) {
             ret = rdma_send(rdma_cfg, 1, (struct dummy_pkt*)pkts_burst[i][j]);
@@ -381,8 +387,8 @@ pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle, struct rdma_config *rdma_cfg)
         //TODO: Write msg to NGINX worker's RX ring.
     }
     ret = rdma_recv(rdma_cfg, rx_pkts, MAX_PKT_BURST);
-    dummy_pdi_rdma_dispath(rx_pkts, MAX_PKT_BURST, (void **)pkts_burst, num_rx_pkts);
     memset(num_rx_pkts, 0, sizeof(size_t) * ccf->worker_processes);
+    dummy_pdi_rdma_dispath(rx_pkts, MAX_PKT_BURST, (void **)pkts_burst, num_rx_pkts);
     for (i = 0; i < ccf->worker_processes; i++) {
         pdin_rdma_rx_mgr(i, pkts_burst[i], num_rx_pkts[i]);
     }
