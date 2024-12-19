@@ -34,6 +34,6 @@ rdma:
     make -C ./RDMA_lib/
 
 init:
+    sed -i 's\https://github.com/ucr-serverless/RDMA_lib.git\git@github.com:ucr-serverless/RDMA_lib.git\g' .gitmodules
     git submodule update --init --recursive
-    cd RDMA_lib
-    git checkout main
+    cd RDMA_lib && git checkout main
