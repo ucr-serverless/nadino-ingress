@@ -2120,6 +2120,7 @@ ngx_http_process_request(ngx_http_request_t *r)
     r->stat_writing = 1;
 #endif
 
+    printf("Addr of ngx_http_request_handler: %p\n", ngx_http_request_handler);
     c->read->handler = ngx_http_request_handler;
     c->write->handler = ngx_http_request_handler;
     r->read_event_handler = ngx_http_block_reading;
@@ -2416,6 +2417,7 @@ ngx_http_request_handler(ngx_event_t *ev)
     }
 
     if (ev->write) {
+        printf("HHHHHHHHHHH: %p\n", r->write_event_handler);
         r->write_event_handler(r);
 
     } else {

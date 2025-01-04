@@ -622,7 +622,9 @@ ngx_kqueue_process_events(ngx_cycle_t *cycle, ngx_msec_t timer,
         switch (event_list[i].filter) {
 
         case EVFILT_READ:
+            printf("++++++++++++++++++++ READ EVENT \n");
         case EVFILT_WRITE:
+            printf("++++++++++++++++++++ WRITE EVENT \n");
 
             instance = (uintptr_t) ev & 1;
             ev = (ngx_event_t *) ((uintptr_t) ev & (uintptr_t) ~1);
@@ -690,6 +692,7 @@ ngx_kqueue_process_events(ngx_cycle_t *cycle, ngx_msec_t timer,
             continue;
         }
 
+        printf("!!!!!!!!!! %s is calling ev->handler(ev): %p; ev->available: %d\n", __func__, ev->handler, ev->available);
         ev->handler(ev);
     }
 

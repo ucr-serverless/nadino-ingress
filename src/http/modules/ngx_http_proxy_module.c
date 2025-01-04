@@ -954,6 +954,54 @@ static ngx_conf_bitmask_t  ngx_http_proxy_cookie_flags_masks[] = {
     { ngx_null_string, 0 }
 };
 
+static void
+print_request_body(ngx_http_request_t *r)
+{
+    ngx_http_request_body_t *body = r->request_body;
+
+    if (body == NULL || body->bufs == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Request body is empty or not available.");
+        printf("Request body is empty or not available.\n");
+        return;
+    }
+
+    ngx_chain_t *chain = body->bufs;
+    ngx_buf_t *buf;
+    u_char *data;
+    size_t len;
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Request body:");
+    printf("Request body:\n");
+
+    // Iterate bufs in the chain
+    for (; chain; chain = chain->next) {
+        buf = chain->buf;
+        
+        if (buf->in_file) {
+            // If data is in a file, you'd need to read from the file descriptor
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Data is in a file, handle file reading.");
+            printf("Data is in a file, handle file reading.\n");
+            continue;
+        }
+
+        // Extract data and length from the buffer
+        data = buf->pos;
+        len = buf->last - buf->pos;
+
+        // Print the buffer contents
+        if (data && len > 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "%*s", (int)len, data);
+            printf("+++++++++++++++ %s\n", data);
+        }
+    }
+}
+
+static void
+print_request_line(ngx_http_request_t *r)
+{
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Request line: %*s", (int)r->request_line.len, r->request_line.data);
+    printf("Request line: %s\n", r->request_line.data);
+}
 
 static ngx_int_t
 ngx_http_proxy_handler(ngx_http_request_t *r)
@@ -965,6 +1013,12 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
 #if (NGX_HTTP_CACHE)
     ngx_http_proxy_main_conf_t  *pmcf;
 #endif
+
+    // print request body
+    printf("+++++++ ======== +++++++ ======== +++++++ ======== +++++++ ======== +++++++ ========  \n");
+    print_request_line(r);
+    print_request_body(r);
+    printf("+++++++ ======== +++++++ ======== +++++++ ======== +++++++ ======== +++++++ ========  \n");
 
     if (ngx_http_upstream_create(r) != NGX_OK) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;

@@ -31,6 +31,8 @@ ngx_event_process_posted(ngx_cycle_t *cycle, ngx_queue_t *posted)
 
         ngx_delete_posted_event(ev);
 
+        printf("--------------- ARE YOU PROCESSING \n");
+
         ev->handler(ev);
     }
 }
