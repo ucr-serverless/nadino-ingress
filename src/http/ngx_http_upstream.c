@@ -9,7 +9,6 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-#include "pdi_rdma.h"
 
 #if (NGX_HTTP_CACHE)
 static ngx_int_t ngx_http_upstream_cache(ngx_http_request_t *r,
@@ -2213,16 +2212,6 @@ ngx_http_upstream_send_request_body(ngx_http_request_t *r,
             out = NULL;
         }
 
-        printf("Request to upstream: %s Length of request: %ld\n", out->buf->start, out->buf->end - out->buf->start);
-        if (out->next != NULL) {
-            printf("You have unread buffer\n");
-        } else {
-            printf("This is a single buffer\n");
-        }
-            
-        // NOTE: ngx worker writes rte ring here
-        (void) pdin_test_ngx_worker_tx();
-
         rc = ngx_output_chain(&u->output, out);
 
         if (rc == NGX_AGAIN) {
@@ -2447,12 +2436,6 @@ ngx_http_upstream_process_header(ngx_http_request_t *r, ngx_http_upstream_t *u)
     for ( ;; ) {
 
         n = c->recv(c, u->buffer.last, u->buffer.end - u->buffer.last);
-
-        printf("received response from upstream: %s \n", u->buffer.last);
-        printf("Length of received response from upstream: %ld \n", u->buffer.end - u->buffer.last);
-
-        // NOTE: ngx worker read RX ring here
-        (void) pdin_test_ngx_worker_rx();
 
         if (n == NGX_AGAIN) {
 #if 0

@@ -74,9 +74,6 @@
 
 #include <ngx_auto_config.h>
 #include "ff_api.h"
-#include "ff_config.h"
-#include <rte_eal.h>
-#include <rte_malloc.h>
 
 #define _GNU_SOURCE
 #define __USE_GNU
@@ -169,36 +166,6 @@ int is_fstack_fd(int sockfd) {
     return sockfd >= ngx_max_sockets;
 }
 
-struct loop_routine {
-    loop_func_t loop;
-    void *arg;
-};
-
-static int
-rdma_main_loop(void *arg)
-{
-    struct loop_routine *lr = (struct loop_routine *)arg;
-
-    while (1) {
-        if (likely(lr->loop != NULL)) {
-            lr->loop(lr->arg);
-        }
-    }
-
-    return 0;
-}
-
-void
-rdma_run(loop_func_t loop, void *arg){
-    struct loop_routine *lr = rte_malloc(NULL,
-        sizeof(struct loop_routine), 0);
-    lr->loop = loop;
-    lr->arg = arg;
-    rte_eal_mp_remote_launch(rdma_main_loop, lr, CALL_MAIN);
-    rte_eal_mp_wait_lcore();
-    rte_free(lr);
-}
-
 // proc_type, 1: primary, 0: secondary.
 int
 ff_mod_init(const char *conf, int proc_id, int proc_type) {
@@ -239,49 +206,6 @@ ff_mod_init(const char *conf, int proc_id, int proc_type) {
     free(ff_argv);
 
     return rc;
-}
-
-int
-rdma_mod_init(const char *conf, int proc_id) {
-    int i;
-    int ret;
-    int ff_argc = 4;
-
-    char **ff_argv = malloc(sizeof(char *)*ff_argc);
-    for (i = 0; i < ff_argc; i++) {
-        ff_argv[i] = malloc(sizeof(char)*PATH_MAX);
-    }
-
-    sprintf(ff_argv[0], "rdma");
-    sprintf(ff_argv[1], "--conf=%s", conf);
-    sprintf(ff_argv[2], "--proc-id=%d", proc_id - 1); // NOTE: -1 is needed to avoid ini_parser error
-    sprintf(ff_argv[3], "--proc-type=secondary");
-
-    ret = ff_load_config(ff_argc, ff_argv);
-    if (ret < 0)
-        exit(1);
-
-    // NOTE: Reverse the effect of proc_id - 1 to configure the correct lcore
-    for (i = 0; i < dpdk_argc; i++) {
-        char *has_core_mask = strstr(dpdk_argv[i], "-c");
-        if (has_core_mask != NULL) {
-            // Skip "-c" to find the core mask
-            char *core_mask = has_core_mask + 2;
-
-            int tmp = atoi(core_mask);
-            tmp *= 10; // NOTE: Magic number, can be used to change the lcore of RDMA backend
-
-            sprintf(dpdk_argv[i], "-c%d", tmp);
-            printf("Updated lcore mask for RDMA backend: %s\n", dpdk_argv[i]);
-        }
-    }
-
-    ret = rte_eal_init(dpdk_argc, dpdk_argv);
-    if (ret < 0) {
-        rte_exit(EXIT_FAILURE, "Error with EAL initialization\n");
-    }
-
-    return 0;
 }
 
 /*-
