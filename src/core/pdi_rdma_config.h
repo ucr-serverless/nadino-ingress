@@ -12,7 +12,7 @@
 #include <libconfig.h>
 #include "pdi_rdma_utils.h"
 #include "ib.h"
- 
+
 #define ROUTING_TABLE_SIZE 256
 #define HOSTNAME_MAX 256
 struct rdma_config

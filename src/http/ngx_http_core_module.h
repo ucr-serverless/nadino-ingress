@@ -309,9 +309,23 @@ typedef struct {
 } ngx_http_err_page_t;
 
 
+typedef struct {
+    ngx_str_t ip;
+    ngx_uint_t port;
+} pdin_rdma_address_t;
+
+
+typedef struct {
+    ngx_uint_t pdin_rdma_addresses_count;
+    pdin_rdma_address_t *pdin_rdma_addresses;
+} pdin_rdma_conf_t;
+
+
 struct ngx_http_core_loc_conf_s {
     ngx_str_t     name;          /* location name */
     ngx_str_t     escaped_name;
+
+    pdin_rdma_conf_t prcf;
 
 #if (NGX_PCRE)
     ngx_http_regex_t  *regex;

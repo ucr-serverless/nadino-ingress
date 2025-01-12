@@ -8,6 +8,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include "pdi_rdma.h"
 
 
 #define  NGX_HTTP_PROXY_COOKIE_SECURE           0x0001
@@ -209,7 +210,7 @@ static ngx_int_t ngx_http_proxy_init_headers(ngx_conf_t *cf,
 
 static char *ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
-static char *pdin_http2rdma_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd,
+static char *pdin_rdma_proxy_init(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
 static char *ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
@@ -311,7 +312,7 @@ static ngx_command_t  ngx_http_proxy_commands[] = {
 
     { ngx_string("palladium_ingress"),
       NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF|NGX_HTTP_LMT_CONF|NGX_CONF_TAKE1,
-      pdin_http2rdma_proxy_pass,
+      pdin_rdma_proxy_init,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
@@ -1057,6 +1058,230 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
     return NGX_DONE;
 }
 
+
+static void
+log_request_url_and_method(ngx_http_request_t *r)
+{
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
+                  "Request URL: %V", &r->uri);
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
+                  "Request Method: %V", &r->method_name);
+}
+
+
+static void
+log_request_header(ngx_http_request_t *r)
+{
+    ngx_list_part_t *part = &r->headers_in.headers.part;
+    ngx_table_elt_t *header = part->elts;
+    for (ngx_uint_t i = 0; /* void */; i++) {
+        if (i >= part->nelts) {
+            if (part->next == NULL) {
+                break;
+            }
+            part = part->next;
+            header = part->elts;
+            i = 0;
+        }
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
+                      "Header: %V: %V", &header[i].key, &header[i].value);
+    }
+}
+
+
+void
+pdin_rdma_recv_handler(ngx_event_t *ev) {
+    ngx_http_request_t *r = (ngx_http_request_t *)ev->data;
+
+    // ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Pointer of r: %p", r);
+    // ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "+++++ pdin_rdma_recv_handler +++++");
+    // log_request_url_and_method(r);
+    // log_request_header(r);
+
+    if (r->connection->destroyed) {
+        ngx_log_error(NGX_LOG_ERR, ev->log, 0, "Connection already destroyed");
+        return;
+    }
+
+    // Construct and send response
+    ngx_buf_t *b;
+    ngx_chain_t out;
+    const char *response = "Request body logged.\n";
+
+    r->headers_out.status = NGX_HTTP_OK;
+    r->headers_out.content_length_n = ngx_strlen(response);
+    r->headers_out.content_type.len = sizeof("text/plain") - 1;
+    r->headers_out.content_type.data = (u_char *)"text/plain";
+
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+
+    b->pos = (u_char *)response;
+    b->last = b->pos + ngx_strlen(response);
+    b->memory = 1;
+    b->last_buf = 1;
+
+    out.buf = b;
+    out.next = NULL;
+
+    ngx_http_send_header(r);
+    ngx_http_output_filter(r, &out);
+    ngx_http_finalize_request(r, NGX_DONE);
+}
+
+
+static void
+pdin_rdma_send_handler(ngx_http_request_t *r) {
+    if (r->method == NGX_HTTP_POST || r->method == NGX_HTTP_PUT) {
+        if (r->request_body == NULL || r->request_body->bufs == NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Failed to read request body.");
+            ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+            return;
+        }
+
+        // Print request body content
+        ngx_buf_t *buf = r->request_body->bufs->buf;
+        if (buf && buf->pos) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
+                        "2nd Request Body: %*s", buf->last - buf->pos, buf->pos);
+        }
+    }
+
+    // Note: write RTE RING and return
+    // ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,  "+++++ Write RTE RING and return +++++");
+    // ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, " +++++ r: %p \t pdin_rdma_recv_handler: %p \t r->connection->log: %p", r, pdin_rdma_recv_handler, r->connection->log);
+
+    struct pdin_rdma_md_s *md = pdin_rdma_md_alloc();
+    md->ngx_http_request_pt = (void *)r; /* pointer to received HTTP request */
+    md->pdin_rdma_handler_pt = (void *)pdin_rdma_recv_handler; /* pointer to callback handler */
+    md->pdin_rdma_handler_log_pt = (void*)r->connection->log;/* pointer to handler log */
+    pdin_rdma_write_rte_ring(ngx_worker, md);
+
+    return;
+}
+
+
+static ngx_int_t
+pdin_rdma_proxy_request_handler(ngx_http_request_t *r) {
+
+    // ngx_http_core_loc_conf_t  *clcf;
+    // clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    // pdin_rdma_address_t *addresses = clcf->prcf.pdin_rdma_addresses;
+
+    // for (ngx_uint_t i = 0; i < clcf->prcf.pdin_rdma_addresses_count; i++) {
+    //     printf("Parsed IP: %.*s\n", (int)addresses[i].ip.len, addresses[i].ip.data);
+    //     printf("Parsed port: %lu\n", addresses[i].port);
+    // }
+
+    // log_request_url_and_method(r);
+    // log_request_header(r);
+
+    // Check if the request body needs to be read
+    if (r->method == NGX_HTTP_POST || r->method == NGX_HTTP_PUT) {
+        if (r->request_body == NULL) {
+            return ngx_http_read_client_request_body(r, pdin_rdma_send_handler);
+        }
+
+        // Print request body content
+        // ngx_buf_t *buf = r->request_body->bufs->buf;
+        // if (buf && buf->pos) {
+        //     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
+        //                   "1st Request Body: %*s", buf->last - buf->pos, buf->pos);
+        // }
+    }
+
+    return ngx_http_read_client_request_body(r, pdin_rdma_send_handler);
+}
+
+
+// Parsing function: extract multiple IPs and ports
+static ngx_int_t
+pdin_rdma_parse_worker_addr(ngx_str_t *value, pdin_rdma_address_t *addresses, ngx_uint_t *n) {
+    u_char *start = value->data;
+    u_char *end = value->data + value->len;
+    u_char *current;
+    ngx_uint_t count = 0;
+
+    while (start < end && count < *n) {
+        // Find next comma or end of string
+        current = ngx_strlchr(start, end, ',');
+
+        if (current == NULL) {
+            current = end;
+        }
+
+        // Find colon to split IP and port
+        u_char *colon = ngx_strlchr(start, current, ':');
+        if (colon == NULL) {
+            return NGX_ERROR; // Invalid format
+        }
+
+        // Extract IP
+        addresses[count].ip.data = start;
+        addresses[count].ip.len = colon - start;
+
+        // Extract port
+        addresses[count].port = ngx_atoi(colon + 1, current - colon - 1);
+        if (addresses[count].port == (ngx_uint_t)NGX_ERROR) {
+            return NGX_ERROR; // Invalid port
+        }
+
+        // Update start pointer
+        start = current + 1; // Skip comma
+        count++;
+    }
+
+    *n = count;
+    return NGX_OK;
+}
+
+
+static char *
+pdin_rdma_proxy_init(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_str_t                  *value, *url;
+    ngx_http_core_loc_conf_t   *clcf;
+
+    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+
+    clcf->handler = pdin_rdma_proxy_request_handler;
+
+    if (clcf->name.len && clcf->name.data[clcf->name.len - 1] == '/') {
+        clcf->auto_redirect = 1;
+    }
+
+    value = cf->args->elts;
+    url = &value[1];
+
+    ngx_uint_t n = 10; // Assume max 10 addresses
+    pdin_rdma_address_t *addresses = ngx_palloc(cf->pool, sizeof(pdin_rdma_address_t) * n);
+    if (addresses == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    if (pdin_rdma_parse_worker_addr(url, addresses, &n) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
+
+    for (ngx_uint_t i = 0; i < n; i++) {
+        printf("Parsed IP: %.*s\n", (int)addresses[i].ip.len, addresses[i].ip.data);
+        printf("Parsed port: %lu\n", addresses[i].port);
+    }
+
+    clcf->prcf.pdin_rdma_addresses_count = n;
+    clcf->prcf.pdin_rdma_addresses = addresses;
+
+    // NOTE: we cannot create RC connections here (we are now in the master process).
+    // But we can exchange QP metadata with worker nodes
+    // And assign the QP metadata to different worker processes? (through "cycle"?)
+    // Then we can let each worker process to create RC connections in ngx_worker_process_cycle()
+
+    return NGX_CONF_OK;
+}
 
 static ngx_int_t
 ngx_http_proxy_eval(ngx_http_request_t *r, ngx_http_proxy_ctx_t *ctx,
@@ -4238,132 +4463,6 @@ ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     u.no_resolve = 1;
 
     plcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0);
-    if (plcf->upstream.upstream == NULL) {
-        return NGX_CONF_ERROR;
-    }
-
-    plcf->vars.schema.len = add;
-    plcf->vars.schema.data = url->data;
-    plcf->vars.key_start = plcf->vars.schema;
-
-    ngx_http_proxy_set_vars(&u, &plcf->vars);
-
-    plcf->location = clcf->name;
-
-    if (clcf->named
-#if (NGX_PCRE)
-        || clcf->regex
-#endif
-        || clcf->noname)
-    {
-        if (plcf->vars.uri.len) {
-            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                               "\"proxy_pass\" cannot have URI part in "
-                               "location given by regular expression, "
-                               "or inside named location, "
-                               "or inside \"if\" statement, "
-                               "or inside \"limit_except\" block");
-            return NGX_CONF_ERROR;
-        }
-
-        plcf->location.len = 0;
-    }
-
-    plcf->url = *url;
-
-    return NGX_CONF_OK;
-}
-
-static char *
-pdin_http2rdma_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
-{
-    ngx_http_proxy_loc_conf_t *plcf = conf;
-
-    size_t                      add;
-    u_short                     port;
-    ngx_str_t                  *value, *url;
-    ngx_url_t                   u;
-    ngx_uint_t                  n;
-    ngx_http_core_loc_conf_t   *clcf;
-    ngx_http_script_compile_t   sc;
-
-    if (plcf->upstream.upstream || plcf->proxy_lengths) {
-        return "is duplicate";
-    }
-
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-
-    clcf->handler = ngx_http_proxy_handler;
-
-    if (clcf->name.len && clcf->name.data[clcf->name.len - 1] == '/') {
-        clcf->auto_redirect = 1;
-    }
-
-    value = cf->args->elts;
-
-    url = &value[1];
-
-    n = ngx_http_script_variables_count(url);
-
-    if (n) {
-
-        ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
-
-        sc.cf = cf;
-        sc.source = url;
-        sc.lengths = &plcf->proxy_lengths;
-        sc.values = &plcf->proxy_values;
-        sc.variables = n;
-        sc.complete_lengths = 1;
-        sc.complete_values = 1;
-
-        if (ngx_http_script_compile(&sc) != NGX_OK) {
-            return NGX_CONF_ERROR;
-        }
-
-#if (NGX_HTTP_SSL)
-        plcf->ssl = 1;
-#endif
-
-        return NGX_CONF_OK;
-    }
-
-    if (ngx_strncasecmp(url->data, (u_char *) "http://", 7) == 0) {
-        add = 7;
-        port = 80;
-
-    } else if (ngx_strncasecmp(url->data, (u_char *) "https://", 8) == 0) {
-
-#if (NGX_HTTP_SSL)
-        plcf->ssl = 1;
-
-        add = 8;
-        port = 443;
-#else
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "https protocol requires SSL support");
-        return NGX_CONF_ERROR;
-#endif
-
-    } else if (ngx_strncasecmp(url->data, (u_char *) "rdma://", 7) == 0) {
-        add = 7;
-        port = 80;
-        // NOTE: parse RDMA proxy_pass
-
-    } else {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "invalid URL prefix");
-        return NGX_CONF_ERROR;
-    }
-
-    ngx_memzero(&u, sizeof(ngx_url_t));
-
-    u.url.len = url->len - add;
-    u.url.data = url->data + add;
-    u.default_port = port;
-    u.uri_part = 1;
-    u.no_resolve = 1;
-
-    plcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0); // parse the URL and store information about the upstream server
     if (plcf->upstream.upstream == NULL) {
         return NGX_CONF_ERROR;
     }

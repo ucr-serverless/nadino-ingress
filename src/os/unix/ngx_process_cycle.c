@@ -867,6 +867,41 @@ ngx_master_process_exit(ngx_cycle_t *cycle)
     exit(0);
 }
 
+static void
+pdin_rdma_rx_procedure(ngx_cycle_t *cycle)
+{
+    struct pdin_rdma_md_s *md = pdin_rdma_read_rte_ring(ngx_worker);
+    if (md == NULL) {
+        return; // No mds in the RTE Ring
+    }
+
+    void *r = md->ngx_http_request_pt;
+    void *handler = md->pdin_rdma_handler_pt;
+    void *log = md->pdin_rdma_handler_log_pt;
+
+    // printf("++ pdin_rdma_rx_procedure ++ r: %p \t handler: %p \t log: %p\n", r, handler, log);
+
+    // NOTE: resue the pool in r
+    ngx_pool_t *pool = ngx_create_pool(4096, cycle->log);
+    if (pool == NULL) {
+        return;
+    }
+
+    ngx_event_t *ev = ngx_pcalloc(pool, sizeof(ngx_event_t));
+    if (ev == NULL) {
+        ngx_destroy_pool(pool);
+        return;
+    }
+
+    ev->handler = (ngx_event_handler_pt) handler;
+    ev->data = r;
+    ev->log = (ngx_log_t*) log;
+
+    ngx_post_event(ev, &ngx_posted_events);
+
+    pdin_rdma_md_free(md);
+}
+
 #if (NGX_HAVE_FSTACK)
 static int
 ngx_worker_process_cycle_loop(void *arg)
@@ -880,7 +915,9 @@ ngx_worker_process_cycle_loop(void *arg)
         }
     }
 
-    //ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0, "worker cycle");
+    // ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0, "worker cycle");
+
+    pdin_rdma_rx_procedure(cycle); // NOTE: Consume RTE RING for events to be posted
 
     ngx_process_events_and_timers(cycle);
 
@@ -926,7 +963,7 @@ ngx_worker_process_cycle(ngx_cycle_t *cycle, void *data)
 
     ngx_setproctitle("worker process");
 
-    pdin_init_worker_rings(cycle);
+    pdin_init_md_rings(cycle); // pdin_init_worker_rings(cycle);
 
 #if (NGX_HAVE_FSTACK)
     ff_run(ngx_worker_process_cycle_loop, (void *)cycle);

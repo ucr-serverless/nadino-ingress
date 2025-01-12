@@ -16,6 +16,8 @@
 #include "pdi_rdma.h"
 #include "pdi_rdma_config.h"
 
+#define MAX_MSG_BUF_SIZE 10240
+
 struct dummy_pkt
 {
     char payload[MAX_MSG_BUF_SIZE];

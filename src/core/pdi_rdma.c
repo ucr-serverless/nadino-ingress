@@ -24,6 +24,9 @@ static struct rte_mempool *message_pool;
 #define DUMMY_MSG_POOL "dummy_msg_pool"
 #define MAX_PKT_BURST 16
 
+static struct rte_ring *ngx_worker_md_rings[100]; // TODO: replace 100 with max num of CPU cores
+static struct rte_mempool *md_pool;
+#define PDIN_RDMA_MD_POOL "md_pool"
 
 /* Note: can be integrated with ff_msg
  * But it will require changing f-stack
@@ -356,4 +359,85 @@ pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle)
         //TODO: Write msg to NGINX worker's RX ring.
         pdin_rdma_rx_mgr(i, pkts_burst[i], nb_pkts);
     }
+}
+
+struct pdin_rdma_md_s *
+pdin_rdma_md_alloc(void)
+{
+    void *md;
+    if (rte_mempool_get(md_pool, &md) < 0) {
+        printf("get buffer from message pool failed.\n");
+        return NULL;
+    }
+
+    return (struct pdin_rdma_md_s *)md;
+}
+
+void
+pdin_rdma_md_free(struct pdin_rdma_md_s *md)
+{
+    rte_mempool_put(md_pool, md);
+}
+
+int
+pdin_init_md_rings(ngx_cycle_t *cycle)
+{
+    int workerid;
+    char name_buf[RTE_RING_NAMESIZE];
+
+    ngx_core_conf_t *ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
+
+    /* Create dummy message buffer pool */
+    if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
+        md_pool = rte_mempool_create(PDIN_RDMA_MD_POOL,
+           NGX_WORKER_RING_SIZE * 2 * ccf->worker_processes,
+           sizeof(struct pdin_rdma_md_s), NGX_WORKER_RING_SIZE / 2, 0,
+           NULL, NULL, NULL, NULL,
+           rte_socket_id(), 0);
+    } else {
+        md_pool = rte_mempool_lookup(PDIN_RDMA_MD_POOL);
+    }
+
+    if (md_pool == NULL) {
+        rte_panic("Create msg mempool failed\n");
+    }
+
+    /* Create rings according to NGINX workers actually running. */
+    for (workerid = 0; workerid < ccf->worker_processes; workerid++) {
+        snprintf(name_buf, RTE_RING_NAMESIZE, "ngx_worker_%d_md_ring", workerid);
+        ngx_worker_md_rings[workerid] = create_ring(name_buf,
+            NGX_WORKER_RING_SIZE, rte_socket_id(), RING_F_SP_ENQ | RING_F_SC_DEQ);
+
+        if (ngx_worker_md_rings[workerid] == NULL)
+            rte_panic("create MD ring:%s failed!\n", name_buf);
+
+        printf("%d create MD ring: %s success, %u ring entries are now free!\n",
+            getpid(), name_buf, rte_ring_free_count(ngx_worker_md_rings[workerid]));
+    }
+
+    return 0;
+}
+
+void
+pdin_rdma_write_rte_ring(ngx_int_t proc_id, struct pdin_rdma_md_s *md)
+{
+    int rc = rte_ring_enqueue(ngx_worker_md_rings[proc_id], md);
+    if (unlikely(rc == -ENOBUFS)) {
+        printf("Not enough room in the ring to enqueue; no object is enqueued.\n");
+    }
+
+    return;
+}
+
+struct pdin_rdma_md_s *
+pdin_rdma_read_rte_ring(ngx_int_t proc_id)
+{
+    struct pdin_rdma_md_s *md;
+    int rc = rte_ring_dequeue(ngx_worker_md_rings[proc_id], (void **)&md);
+    if (unlikely(rc == -ENOENT)) {
+        // printf("Not enough entries in the ring to dequeue, no object is dequeued.\n");
+        return NULL;
+    }
+
+    return md;
 }
