@@ -10,6 +10,10 @@
 #include <nginx.h>
 
 
+#include <doca_log.h>
+DOCA_LOG_REGISTER(NGINX::MAIN);
+
+
 static void ngx_show_version_info(void);
 static ngx_int_t ngx_add_inherited_sockets(ngx_cycle_t *cycle);
 static void ngx_cleanup_environment(void *data);
@@ -222,6 +226,24 @@ main(int argc, char *const *argv)
     ngx_cycle_t      *cycle, init_cycle;
     ngx_conf_dump_t  *cd;
     ngx_core_conf_t  *ccf;
+
+
+    doca_error_t result;
+    struct doca_log_backend *sdk_log;
+
+    /* Register a logger backend */
+    result = doca_log_backend_create_standard();
+    if (result != DOCA_SUCCESS)
+        DOCA_LOG_ERROR("Sample finished with errors");
+
+    /* Register a logger backend for internal SDK errors and warnings */
+    result = doca_log_backend_create_with_file_sdk(stderr, &sdk_log);
+    if (result != DOCA_SUCCESS)
+        DOCA_LOG_ERROR("Sample finished with errors");
+    result = doca_log_backend_set_sdk_level(sdk_log, DOCA_LOG_LEVEL_WARNING);
+    if (result != DOCA_SUCCESS)
+        DOCA_LOG_ERROR("Sample finished with errors");
+
 
     ngx_debug_init();
 
