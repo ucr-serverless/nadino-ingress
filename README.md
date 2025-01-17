@@ -29,7 +29,7 @@ conda activate ingress
 # Install build dependencies (TODO: remove unnecessary deps)
 sudo apt update && sudo apt install -y flex bison build-essential dwarves libssl-dev libelf-dev \
                     libnuma-dev pkg-config python3-pip python3-pyelftools \
-                    libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev
+                    libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev libglib2.0-dev
 
 pip3 install meson ninja
 pip3 install pyelftools --upgrade
@@ -95,6 +95,9 @@ sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
 
 # Print logs of NGINX
 sudo cat /var/log/syslog | grep "f-stack"
+
+# Print NGINX Runtime Logs
+tail -f /usr/local/nginx_fstack/logs/error.log
 
 # Modify F-stack configuration
 sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
