@@ -36,6 +36,7 @@ CORE_LIBS="$CORE_LIBS \$(shell pkg-config --libs glib-2.0 libconfig) -LRDMA_lib 
 CORE_LIBS="$CORE_LIBS \$(shell pkg-config --libs doca-common)"
 CORE_LIBS="$CORE_LIBS \$(shell pkg-config --libs doca-argp)"
 CORE_LIBS="$CORE_LIBS \$(shell pkg-config --libs doca-rdma)"
+CORE_LIBS="$CORE_LIBS \$(shell pkg-config --libs doca-dma)"
 
 cat << END                                                     > $NGX_MAKEFILE
 
@@ -52,7 +53,7 @@ CFLAGS += \$(shell pkg-config --cflags libconfig glib-2.0)
 CFLAGS += -IRDMA_lib/include
 CFLAGS += -IDOCA_lib/include
 CFLAGS += -D DOCA_ALLOW_EXPERIMENTAL_API
-CFLAGS += \$(shell pkg-config --cflags doca-common doca-argp doca-rdma)
+CFLAGS += \$(shell pkg-config --cflags doca-common doca-argp doca-rdma doca-dma)
 CFLAGS += -I$FF_PATH/lib
 END
 
