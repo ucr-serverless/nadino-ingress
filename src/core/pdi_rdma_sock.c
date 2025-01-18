@@ -27,6 +27,9 @@
 #include <unistd.h>
 
 #include "pdi_rdma_sock.h"
+
+ngx_log_t * rdma_log;
+
 ssize_t sock_utils_read(int sock_fd, void *buffer, ssize_t len)
 {
     ssize_t nr, tot_read;
