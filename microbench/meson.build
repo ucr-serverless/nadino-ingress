@@ -112,8 +112,6 @@ if doca_found
       cpp_args: cflags + doca_cflags,
       link_args: ldflags + ldlibs,
       dependencies: [libconfig_dep, dpdk_dep, glib_dep, ibverbs_dep, doca_dep, build_doca_dep, doca_common, doca_rdma_dep, doca_argp_dep, doca_comch_dep, doca_dma_dep],
-    #   dependencies: [libconfig_dep, dpdk_dep, glib_dep, rdma_dep, ibverbs_dep, build_rdma_dep, doca_dep, build_doca_dep, doca_common, doca_rdma_dep, doca_argp_dep, doca_comch_dep, doca_dma_dep],
-    #   link_with: [libclib_dep],
       install: false
     )
   endforeach

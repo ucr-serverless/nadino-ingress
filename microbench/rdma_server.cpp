@@ -45,8 +45,6 @@
 #include <netdb.h>
 #include <unordered_map>
 
-#define DEFAULT_PCI_ADDR "b1:00.0"
-#define DEFAULT_MESSAGE "Message from the client"
 #define MAX_PORT_LEN 6
 
 DOCA_LOG_REGISTER(RDMA_SERVER::MAIN);
@@ -64,64 +62,7 @@ int host_fd = 0;
 std::unordered_map<struct doca_buf*, struct doca_buf*> dpu_buf_to_host_buf;
 std::unordered_map<struct doca_buf*, struct doca_buf*> dst_buf_to_src_buf;
 std::unordered_map<struct doca_buf*, struct doca_rdma_task_receive*> dst_buf_to_recv_task;
-
 // std::unordered_map<struct doca_rdma_connection*, std::pair<struct doca_buf*, struct doca_buf*>> conn_buf_pair;
-
-doca_error_t init_send_imm_rdma_resources_without_start(struct rdma_resources *resources, struct rdma_config *cfg,
-                                                        struct rdma_cb_config *cb_cfg)
-{
-    union doca_data ctx_user_data = {0};
-    doca_error_t result, tmp_result;
-
-    result = doca_rdma_task_receive_set_conf(resources->rdma, cb_cfg->msg_recv_cb, cb_cfg->msg_recv_err_cb,
-                                             DEFAULT_RDMA_TASK_NUM);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to set configurations for RDMA receive task: %s", doca_error_get_descr(result));
-        goto destroy_resources;
-    }
-    result = doca_rdma_task_send_imm_set_conf(resources->rdma, cb_cfg->send_imm_task_comp_cb,
-                                              cb_cfg->send_imm_task_comp_err_cb, DEFAULT_RDMA_TASK_NUM);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to set configurations for RDMA send task: %s", doca_error_get_descr(result));
-        goto destroy_resources;
-    }
-
-    result = doca_ctx_set_state_changed_cb(resources->rdma_ctx, cb_cfg->state_change_cb);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to set state change callback for RDMA context: %s", doca_error_get_descr(result));
-        goto destroy_resources;
-    }
-
-    /* Include the program's resources in user data of context to be used in callbacks */
-    ctx_user_data.ptr = cb_cfg->ctx_user_data;
-    result = doca_ctx_set_user_data(resources->rdma_ctx, ctx_user_data);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set context user data: %s", doca_error_get_descr(result));
-        goto destroy_resources;
-    }
-
-    // result = doca_rdma_set_connection_state_callbacks(
-    //     resources->rdma, cb_cfg->doca_rdma_connect_request_cb, cb_cfg->doca_rdma_connect_established_cb,
-    //     cb_cfg->doca_rdma_connect_failure_cb, cb_cfg->doca_rdma_disconnect_cb);
-    // if (result != DOCA_SUCCESS)
-    // {
-    //     DOCA_LOG_ERR("Failed to set rdma cm callback configuration, error: %s", doca_error_get_descr(result));
-    //     return result;
-    // }
-
-    /* Start RDMA context */
-
-    return result;
-
-destroy_resources:
-    tmp_result = destroy_rdma_resources(resources, cfg);
-    if (tmp_result != DOCA_SUCCESS)
-    {
-        DOCA_LOG_ERR("Failed to destroy DOCA RDMA resources: %s", doca_error_get_descr(tmp_result));
-        DOCA_ERROR_PROPAGATE(result, tmp_result);
-    }
-    return tmp_result;
-}
 
 int
 int_to_port_str(int port, char *ret, size_t len)
@@ -163,7 +104,8 @@ sock_utils_write(int sock_fd, void *buffer, size_t len)
     return tot_written;
 }
 
-int sock_utils_bind(char *ip, char *port)
+int
+sock_utils_bind(char *ip, char *port)
 {
     struct addrinfo hints;
     struct addrinfo *result, *rp;
@@ -221,43 +163,68 @@ error:
     return -1;
 }
 
-void rdma_dma_memcpy_completed_callback(struct doca_dma_task_memcpy *dma_task, union doca_data task_user_data,
-                                         union doca_data ctx_user_data)
+doca_error_t
+init_send_imm_rdma_resources_without_start(struct rdma_resources *resources,
+                                           struct rdma_config *cfg,
+                                           struct rdma_cb_config *cb_cfg)
 {
-    doca_error_t result = DOCA_SUCCESS;
-    struct doca_rdma_connection *conn = (struct doca_rdma_connection *)task_user_data.ptr;
+    union doca_data ctx_user_data = {0};
+    doca_error_t result, tmp_result;
 
-    struct rdma_resources *resources = (struct rdma_resources *)ctx_user_data.ptr;
+    result = doca_rdma_task_receive_set_conf(resources->rdma, cb_cfg->msg_recv_cb, cb_cfg->msg_recv_err_cb,
+                                             DEFAULT_RDMA_TASK_NUM);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Unable to set configurations for RDMA receive task: %s", doca_error_get_descr(result));
+        goto destroy_resources;
+    }
+    result = doca_rdma_task_send_imm_set_conf(resources->rdma, cb_cfg->send_imm_task_comp_cb,
+                                              cb_cfg->send_imm_task_comp_err_cb, DEFAULT_RDMA_TASK_NUM);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Unable to set configurations for RDMA send task: %s", doca_error_get_descr(result));
+        goto destroy_resources;
+    }
 
-    struct doca_buf *dma_src_buf = (struct doca_buf*)doca_dma_task_memcpy_get_src(dma_task);
-    struct doca_buf *dma_dst_buf = (struct doca_buf*)doca_dma_task_memcpy_get_dst(dma_task);
-    // the dma_src buf in the on path mode is the dst_buf on the DPU,
-    // we then need to query the corresponding src_buf and the rdam_connection then send back
-    struct doca_buf *src_buf = dst_buf_to_src_buf[dma_src_buf];
+    result = doca_ctx_set_state_changed_cb(resources->rdma_ctx, cb_cfg->state_change_cb);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Unable to set state change callback for RDMA context: %s", doca_error_get_descr(result));
+        goto destroy_resources;
+    }
 
-    doca_buf_reset_data_len(dma_src_buf);
-    doca_buf_reset_data_len(dma_dst_buf);
-    /* Assign success to the result */
-    // DOCA_LOG_INFO("DMA task was completed successfully");
+    /* Include the program's resources in user data of context to be used in callbacks */
+    ctx_user_data.ptr = cb_cfg->ctx_user_data;
+    result = doca_ctx_set_user_data(resources->rdma_ctx, ctx_user_data);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set context user data: %s", doca_error_get_descr(result));
+        goto destroy_resources;
+    }
 
-    auto rdma_recv_task = dst_buf_to_recv_task[dma_src_buf];
-    result = doca_task_submit(doca_rdma_task_receive_as_task(rdma_recv_task));
-    JUMP_ON_DOCA_ERROR(result, free_task);
+    // result = doca_rdma_set_connection_state_callbacks(
+    //     resources->rdma, cb_cfg->doca_rdma_connect_request_cb, cb_cfg->doca_rdma_connect_established_cb,
+    //     cb_cfg->doca_rdma_connect_failure_cb, cb_cfg->doca_rdma_disconnect_cb);
+    // if (result != DOCA_SUCCESS)
+    // {
+    //     DOCA_LOG_ERR("Failed to set rdma cm callback configuration, error: %s", doca_error_get_descr(result));
+    //     return result;
+    // }
 
-    /* Free task */
-    struct doca_rdma_task_send_imm *send_task;
-    doca_task_free(doca_dma_task_memcpy_as_task(dma_task));
-    result = submit_send_imm_task(resources->rdma, conn, src_buf, 0, task_user_data, &send_task);
-    LOG_ON_FAILURE(result);
+    /* Start RDMA context */
 
-    return;
+    return result;
 
-free_task:
-    doca_task_free(doca_rdma_task_receive_as_task(rdma_recv_task));
+destroy_resources:
+    tmp_result = destroy_rdma_resources(resources, cfg);
+    if (tmp_result != DOCA_SUCCESS)
+    {
+        DOCA_LOG_ERR("Failed to destroy DOCA RDMA resources: %s", doca_error_get_descr(tmp_result));
+        DOCA_ERROR_PROPAGATE(result, tmp_result);
+    }
+    return tmp_result;
 }
 
-void server_rdma_recv_then_send_callback(struct doca_rdma_task_receive *rdma_receive_task, union doca_data task_user_data,
-                                  union doca_data ctx_user_data)
+void
+server_rdma_recv_then_send_callback(struct doca_rdma_task_receive *rdma_receive_task,
+                                    union doca_data task_user_data,
+                                    union doca_data ctx_user_data)
 {
     doca_error_t result;
     struct doca_rdma_task_send_imm *send_task;
@@ -310,42 +277,6 @@ void server_rdma_recv_then_send_callback(struct doca_rdma_task_receive *rdma_rec
 
 free_task:
     result = doca_buf_dec_refcount(recv_buf, NULL);
-    if (result != DOCA_SUCCESS)
-    {
-        DOCA_LOG_ERR("Failed to decrease dst_buf count: %s", doca_error_get_descr(result));
-        DOCA_ERROR_PROPAGATE(result, result);
-    }
-    doca_task_free(doca_rdma_task_receive_as_task(rdma_receive_task));
-}
-
-void
-rdma_recv_then_dma(struct doca_rdma_task_receive *rdma_receive_task, union doca_data task_user_data,
-                                  union doca_data ctx_user_data)
-{
-    // DOCA_LOG_INFO("message received");
-    struct rdma_resources *resources = (struct rdma_resources *)ctx_user_data.ptr;
-    doca_error_t result;
-
-    (void)task_user_data;
-    const struct doca_rdma_connection *conn = doca_rdma_task_receive_get_result_rdma_connection(rdma_receive_task);
-
-    struct doca_rdma_connection *rdma_connection = (struct doca_rdma_connection *)conn;
-
-    struct doca_buf *dst_buf = doca_rdma_task_receive_get_dst_buf(rdma_receive_task);
-    if (dst_buf == NULL) {
-        DOCA_LOG_ERR("get src buf fail");
-    }
-
-    union doca_data task_data;
-    task_data.ptr = rdma_connection;
-    struct doca_dma_task_memcpy *dma_task;
-    // submit dma task then resubmit rdma recv task in dma callback
-    result = submit_dma_task(resources->dma_res.dma, dst_buf, dpu_buf_to_host_buf[dst_buf], task_data, &dma_task);
-    JUMP_ON_DOCA_ERROR(result, free_task);
-    return;
-
-free_task:
-    result = doca_buf_dec_refcount(dst_buf, NULL);
     if (result != DOCA_SUCCESS)
     {
         DOCA_LOG_ERR("Failed to decrease dst_buf count: %s", doca_error_get_descr(result));
@@ -429,8 +360,11 @@ destroy_src_buf:
     return result;
 }
 
-static void server_rdma_state_changed_callback(const union doca_data user_data, struct doca_ctx *ctx,
-                                               enum doca_ctx_states prev_state, enum doca_ctx_states next_state)
+static void
+server_rdma_state_changed_callback(const union doca_data user_data,
+                                   struct doca_ctx *ctx,
+                                   enum doca_ctx_states prev_state,
+                                   enum doca_ctx_states next_state)
 {
     struct rdma_resources *resources = (struct rdma_resources *)user_data.ptr;
     doca_error_t result;
@@ -438,8 +372,7 @@ static void server_rdma_state_changed_callback(const union doca_data user_data, 
     (void)ctx;
     (void)prev_state;
 
-    switch (next_state)
-    {
+    switch (next_state) {
     case DOCA_CTX_STATE_IDLE:
         DOCA_LOG_INFO("CC server context has been stopped");
         /* We can stop progressing the PE */
@@ -469,7 +402,6 @@ static void server_rdma_state_changed_callback(const union doca_data user_data, 
         DOCA_LOG_INFO("sent start signal");
         sock_utils_write(resources->cfg->sock_fd, &started, sizeof(char));
 
-
         break;
     case DOCA_CTX_STATE_STOPPING:
         /**
@@ -488,9 +420,10 @@ error:
     doca_ctx_stop(ctx);
     destroy_inventory(resources->buf_inventory);
     destroy_rdma_resources(resources, resources->cfg);
-    
 }
-doca_error_t run_server(void *cfg)
+
+doca_error_t
+run_server(void *cfg)
 {
     doca_error_t result;
     struct rdma_config *config = (struct rdma_config *)cfg;
@@ -549,7 +482,8 @@ error:
     return result;
 }
 
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
     struct rdma_config cfg;
     doca_error_t result;
