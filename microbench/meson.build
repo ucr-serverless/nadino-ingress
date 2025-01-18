@@ -64,7 +64,7 @@ root_dir = meson.project_source_root()
 # Define compiler and linker flags
 cflags = ['-MMD', '-MP', '-O3', '-Wall', '-Werror', '-DLOG_USE_COLOR']
 ldflags = ['-L/usr/lib64']
-ldlibs = ['-lbpf', '-lm', '-pthread', '-luuid']
+ldlibs = ['-lm', '-pthread', '-luuid']
 
 # Compile DOCA_lib
 doca_dir = root_dir + '/../DOCA_lib'
