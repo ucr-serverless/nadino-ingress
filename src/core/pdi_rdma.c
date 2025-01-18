@@ -1,14 +1,16 @@
-#include <stdio.h>
+#include <ngx_event.h>
+#include <netinet/in.h>
 
-#include <ngx_config.h>
-#include <ngx_core.h>
-#include "pdi_rdma.h"
+#include <stdio.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/un.h>
-#include <ngx_core.h>
 
+#include "pdi_rdma.h"
+#include <doca_log.h>
+#include <doca_argp.h>
+DOCA_LOG_REGISTER(WORKER::PDI_RDMA);
 
 static int u_sockfd;
 static int worker_msg_cnt;
@@ -27,6 +29,11 @@ static struct rte_mempool *message_pool;
 static struct rte_ring *ngx_worker_md_rings[100]; // TODO: replace 100 with max num of CPU cores
 static struct rte_mempool *md_pool;
 #define PDIN_RDMA_MD_POOL "md_pool"
+
+#define MAX_RETRIES 5
+#define RETRY_DELAY_US 5000 // 5 milliseconds
+
+int rdma_ctrl_path_sockfd;
 
 /* Note: can be integrated with ff_msg
  * But it will require changing f-stack
@@ -297,11 +304,8 @@ ud_sock_receive_message_from_worker()
 void
 pdin_test_ngx_worker_tx()
 {
-    // send_message_to_worker(cycle);
-
     struct dummy_msg *pkts_burst[MAX_PKT_BURST];
 
-    // TODO: integrate with ngx_handle_read_event(rev, flags)
     if (round_cnt < MAX_ROUNDS) {
         char message[100];
         int i;
@@ -324,7 +328,6 @@ pdin_test_ngx_worker_rx()
 {
     struct dummy_msg *pkts_burst[MAX_PKT_BURST];
 
-    // TODO: integrate with ngx_handle_write_event(wev, lowat)
     if (round_cnt < MAX_ROUNDS) {
         // recv msg from RDMA backend
         int nb_rb = pdin_ngx_rx_mgr(ngx_worker, pkts_burst);
@@ -339,24 +342,13 @@ pdin_test_ngx_worker_rx()
 void
 pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle)
 {
-    // receive_message_from_worker();
-
-    // printf("##### Run rdma_worker process_cycle_loop #####\n");
-    // ngx_msleep(1000);
-
     ngx_core_conf_t *ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
     struct dummy_msg *pkts_burst[ccf->worker_processes][MAX_PKT_BURST];
     
     int i;
     for (i = 0; i < ccf->worker_processes; i++) {
-        //TODO: poll NGINX workers' TX ring to see any message
         int nb_pkts = pdin_rdma_tx_mgr(i, pkts_burst[i]);
 
-        //TODO: Send msg to serverless functions
-
-        //TODO: Recv msg from serverless functions
-
-        //TODO: Write msg to NGINX worker's RX ring.
         pdin_rdma_rx_mgr(i, pkts_burst[i], nb_pkts);
     }
 }
@@ -440,4 +432,478 @@ pdin_rdma_read_rte_ring(ngx_int_t proc_id)
     }
 
     return md;
+}
+
+static void
+pdin_rdma_post_http_response(struct pdin_rdma_md_s *md)
+{
+    void *r = md->ngx_http_request_pt;
+    void *handler = md->pdin_rdma_handler_pt;
+    void *log = md->pdin_rdma_handler_log_pt;
+    void *pool = md->ngx_http_request_mempool_pt;
+
+    ngx_event_t *ev = ngx_pcalloc((ngx_pool_t *)pool, sizeof(ngx_event_t));
+    if (ev == NULL) {
+        ngx_destroy_pool(pool);
+        return;
+    }
+
+    ev->handler = (ngx_event_handler_pt) handler;
+    ev->data = r;
+    ev->log = (ngx_log_t*) log;
+
+    ngx_post_event(ev, &ngx_posted_events);
+}
+
+void
+client_rdma_recv_then_send_callback(struct doca_rdma_task_receive *recv_task,
+                                    union doca_data task_user_data,
+                                    union doca_data ctx_user_data)
+{
+    doca_error_t result;
+    struct rdma_resources *resources = (struct rdma_resources *)ctx_user_data.ptr;
+
+    struct doca_buf *recv_buf = doca_rdma_task_receive_get_dst_buf(recv_task);
+
+    /* Parse PDIN RDMA header */
+    struct pdin_rdma_md_s *recv_data;
+    result = doca_buf_get_data(recv_buf, (void **) &recv_data);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%u] failed to get buf data: %s",
+                        resources->id, doca_error_get_descr(result));
+    }
+
+    // DOCA_LOG_INFO("Received PDIN RDMA header: [r:%p] [handler:%p] [rlog:%p] [mp: %p]",
+    //         recv_data->ngx_http_request_pt, recv_data->pdin_rdma_handler_pt,
+    //         recv_data->pdin_rdma_handler_log_pt, recv_data->ngx_http_request_mempool_pt);
+
+    /* Post HTTP response event to NGINX event loop */
+    pdin_rdma_post_http_response(recv_data);
+
+    doca_buf_reset_data_len(recv_buf);
+
+    resources->n_received_req++;
+    // DOCA_LOG_INFO("Worker [%u] completed [%d] recv tasks: recv_buf addr [%p], resource->dst_buf [%p]",
+    //             resources->id, resources->n_received_req, recv_buf, resources->dst_buf);
+
+    result = doca_task_submit(doca_rdma_task_receive_as_task(recv_task));
+    JUMP_ON_DOCA_ERROR(result, free_task);
+
+    return;
+
+free_task:
+    result = doca_buf_dec_refcount(recv_buf, NULL);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%u] failed to decrease dst_buf count: %s",
+                        resources->id, doca_error_get_descr(result));
+        DOCA_ERROR_PROPAGATE(result, result);
+    }
+
+    doca_task_free(doca_rdma_task_receive_as_task(recv_task));
+    doca_ctx_stop(resources->rdma_ctx);
+
+    DOCA_LOG_INFO("Worker [%u] closed DOCA RDMA context", resources->id);
+}
+
+static doca_error_t
+local_rdma_conn_recv_and_send(struct rdma_resources* resources)
+{
+    doca_error_t result;
+    struct doca_rdma_task_receive  *recv_task;
+
+    /* Export RDMA connection details */
+    result = doca_rdma_export(resources->rdma, &(resources->rdma_conn_descriptor),
+                              &(resources->rdma_conn_descriptor_size), &(resources->connections[0]));
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%u] failed to export RDMA: %s", resources->id, doca_error_get_descr(result));
+    }
+
+    /* Send RDMA connection details to the DNE */
+    /* result = write_read_connection(resources->cfg, resources, i); */
+    result = sock_send_buffer(resources->rdma_conn_descriptor, resources->rdma_conn_descriptor_size, rdma_ctrl_path_sockfd);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%u] failed to send details from sender: %s", resources->id, doca_error_get_descr(result));
+    }
+
+    /* Wait for RDMA connection details from the DNE */
+    result = sock_recv_buffer(resources->remote_rdma_conn_descriptor,
+                                &resources->remote_rdma_conn_descriptor_size,
+                                MAX_RDMA_DESCRIPTOR_SZ, rdma_ctrl_path_sockfd);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%u] failed to recv details from sender: %s", resources->id, doca_error_get_descr(result));
+    }
+
+    DOCA_LOG_INFO("exchanged RDMA info on [%u]", resources->id);
+
+    result = doca_rdma_connect(resources->rdma, resources->remote_rdma_conn_descriptor,
+                               resources->remote_rdma_conn_descriptor_size, resources->connections[0]);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%u] failed to connect the receiver's RDMA to the sender's RDMA: %s",
+                    resources->id, doca_error_get_descr(result));
+        (void)doca_ctx_stop(doca_rdma_as_ctx(resources->rdma));
+    }
+
+    result = init_inventory(&resources->buf_inventory, 5);
+    JUMP_ON_DOCA_ERROR(result, error);
+
+    DOCA_LOG_INFO("Worker [%u]'s RDMA client context is running", resources->id);
+
+    /* Allocate a buffer for the send task */
+    result = get_buf_from_inv_with_full_data_len(resources->buf_inventory, resources->mmap,
+                                                resources->mmap_memrange, resources->cfg->msg_sz,
+                                                &resources->src_buf);
+    if (result != DOCA_SUCCESS) {
+        LOG_ON_FAILURE(result);
+        return result;
+    }
+    // print_doca_buf_len(resources->src_buf);
+
+    /* Allocate a buffer for the recv task */
+    result = get_buf_from_inv_with_zero_data_len(resources->buf_inventory, resources->mmap,
+                                                resources->mmap_memrange + resources->cfg->msg_sz, resources->cfg->msg_sz,
+                                                &resources->dst_buf);
+    if (result != DOCA_SUCCESS) {
+        LOG_ON_FAILURE(result);
+        return result;
+    }
+    // print_doca_buf_len(resources->dst_buf);
+
+    DOCA_LOG_INFO("Worker [%u] waits for ACK from the DNE", resources->id);
+
+    /* Wait for ACK from DNE on the worker node */
+    char svr_ack;
+    pdin_rdma_ctrl_path_client_read(rdma_ctrl_path_sockfd, &svr_ack, sizeof(char));
+    if (svr_ack == '1') {
+        // cfg.is_perf_started = true;
+        DOCA_LOG_INFO("Worker [%ld] received ACK from the DNE", ngx_worker);
+    }
+
+    union doca_data task_user_data;
+    task_user_data.ptr = &resources->first_encountered_error;
+    result = submit_recv_task(resources->rdma, resources->dst_buf, task_user_data, &recv_task);
+    LOG_ON_FAILURE(result);
+
+    DOCA_LOG_INFO("Worker [%u] submits a RECV task", resources->id);
+
+error:
+    return result;
+};
+
+static void
+client_rdma_state_changed_callback(const union doca_data user_data,
+                                   struct doca_ctx *ctx,
+                                   enum doca_ctx_states prev_state,
+                                   enum doca_ctx_states next_state)
+{
+    doca_error_t result;
+
+    struct rdma_resources *resources = (struct rdma_resources *)user_data.ptr;
+    (void)ctx;
+    (void)prev_state;
+
+    switch (next_state) {
+    case DOCA_CTX_STATE_IDLE:
+        DOCA_LOG_INFO("Worker [%u]'s DOCA RDMA client has been stopped", resources->id);
+        /* We can stop progressing the PE */
+
+        resources->run_pe_progress = false;
+        break;
+    case DOCA_CTX_STATE_STARTING:
+        /**
+         * The context is in starting state, this is unexpected for CC server.
+         */
+        // need to get the connection object first
+        DOCA_LOG_INFO("Worker [%u]'s DOCA RDMA client switched to STARTING state", resources->id);
+        break;
+    case DOCA_CTX_STATE_RUNNING:
+        DOCA_LOG_INFO("Worker [%u]'s DOCA RDMA client is in RUNNING state", resources->id);
+
+        result = local_rdma_conn_recv_and_send(resources);
+        LOG_ON_FAILURE(result);
+        break;
+    case DOCA_CTX_STATE_STOPPING:
+        /**
+         * The context is in stopping, this can happen when fatal error encountered or when stopping context.
+         * doca_pe_progress() will cause all tasks to be flushed, and finally transition state to idle
+         */
+        doca_buf_dec_refcount(resources->dst_buf, NULL);
+        DOCA_LOG_INFO("Worker [%u]'s DOCA RDMA client switched to STOPPING state", resources->id);
+        break;
+    default:
+        break;
+    }
+}
+
+void
+pdin_init_doca_rdma_client_ctx(ngx_int_t proc_id, void *cfg, ngx_cycle_t *cycle)
+{
+    doca_error_t result;
+    struct rdma_config *config = (struct rdma_config *)cfg;
+
+    /* Set rdma_ctrl_path_sockfd */
+    rdma_ctrl_path_sockfd = config->sock_fd;
+
+    struct rdma_resources *resources = malloc(sizeof(struct rdma_resources));
+    memset(resources, 0, sizeof(struct rdma_resources));
+    resources->id = proc_id;
+    resources->run_pe_progress = true;
+    resources->remote_rdma_conn_descriptor = malloc(MAX_RDMA_DESCRIPTOR_SZ);
+    resources->cfg = config;
+
+    uint32_t mmap_permissions = DOCA_ACCESS_FLAG_LOCAL_READ_WRITE;
+    uint32_t rdma_permissions = DOCA_ACCESS_FLAG_LOCAL_READ_WRITE;
+    
+    /* DOCA dev, mmap, PE, DOCA RDMA ctx */
+    result = allocate_rdma_resources(config, mmap_permissions, rdma_permissions,
+                                     doca_rdma_cap_task_receive_is_supported,
+                                     resources, config->msg_sz * 2, config->n_thread);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%ld] failed to allocate RDMA Resources: %s",
+                        proc_id, doca_error_get_descr(result));
+        return;
+    }
+
+    struct rdma_cb_config cb_cfg = {
+        .send_imm_task_comp_cb = basic_send_imm_completed_callback, /* doca_rdma_task_send_imm_set_conf */
+        .send_imm_task_comp_err_cb = basic_send_imm_completed_err_callback,
+        .msg_recv_cb = client_rdma_recv_then_send_callback, /* doca_rdma_task_receive_set_conf */
+        .msg_recv_err_cb = rdma_recv_err_callback,
+        .data_path_mode = false,
+        .ctx_user_data = resources,
+        .state_change_cb = client_rdma_state_changed_callback, /* doca_ctx_set_state_changed_cb */
+    };
+
+    /* recv task, send_imm task, state change */
+    result = init_send_imm_rdma_resources(resources, config, &cb_cfg);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%ld] failed to init rdma client with error = %s",
+                        proc_id, doca_error_get_name(result));
+        return;
+    }
+
+    DOCA_LOG_INFO("Worker [%ld] started DOCA RDMA client", proc_id);
+
+    cycle->rdma_resources = resources;
+
+    return;
+}
+
+void
+pdin_destroy_doca_rdma_client_ctx(struct rdma_config *config, struct rdma_resources *resources)
+{
+    destroy_inventory(resources->buf_inventory);
+    destroy_rdma_resources(resources, config);
+
+    return;
+}
+
+static void
+configure_keepalive(int sockfd)
+{
+    int optval;
+    socklen_t optlen = sizeof(optval);
+
+    // Enable TCP keep-alive
+    optval = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0) {
+        DOCA_LOG_INFO("setsockopt(SO_KEEPALIVE)");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+
+    // Set TCP keep-alive parameters
+    optval = 60; // Seconds before sending keepalive probes
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &optval, optlen) < 0) {
+        DOCA_LOG_INFO("setsockopt(TCP_KEEPIDLE)");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+
+    optval = 10; // Interval in seconds between keepalive probes
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &optval, optlen) < 0) {
+        DOCA_LOG_INFO("setsockopt(TCP_KEEPINTVL)");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+
+    optval = 5; // Number of unacknowledged probes before considering the connection dead
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &optval, optlen) < 0) {
+        DOCA_LOG_INFO("setsockopt(TCP_KEEPCNT)");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+}
+
+/*
+ * This approach will attempt to connect to the server multiple times,
+ * giving it some time to become ready. If the connection is not successful
+ * within the specified number of retries, the function will return an error.
+ */
+static int
+retry_connect(int sockfd, struct sockaddr *addr)
+{
+    int attempts = 0;
+    int ret;
+
+    do {
+        ret = connect(sockfd, addr, sizeof(struct sockaddr_in));
+        if (ret == 0) {
+            break;
+        } else {
+            attempts++;
+            DOCA_LOG_WARN("connect() error: %s. Retrying %d times ...", strerror(errno), attempts);
+            usleep(RETRY_DELAY_US);
+        }
+    } while (ret == -1 && attempts < MAX_RETRIES);
+
+    return ret;
+}
+
+int
+pdin_rdma_ctrl_path_client_connect(char *server_ip, uint16_t server_port)
+{
+    DOCA_LOG_INFO("PDIN connects with worker node (%s:%u).", server_ip, server_port);
+
+    struct sockaddr_in server_addr;
+    int sockfd;
+    int ret;
+    int opt = 1;
+
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (unlikely(sockfd == -1)) {
+        DOCA_LOG_INFO("socket() error: %s", strerror(errno));
+        return -1;
+    }
+
+    // Set SO_REUSEADDR to reuse the address
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    {
+        DOCA_LOG_INFO("setsockopt(SO_REUSEADDR) failed");
+        close(sockfd);
+        return -1;
+    }
+
+    configure_keepalive(sockfd);
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(server_port);
+    server_addr.sin_addr.s_addr = inet_addr(server_ip);
+
+    ret = retry_connect(sockfd, (struct sockaddr *)&server_addr);
+    if (unlikely(ret == -1)) {
+        DOCA_LOG_INFO("connect() failed: %s", strerror(errno));
+        return -1;
+    }
+
+    return sockfd;
+}
+
+ssize_t
+pdin_rdma_ctrl_path_client_read(int sock_fd, void *buffer, size_t len)
+{
+    ssize_t nr, tot_read;
+    char *buf = buffer; // avoid pointer arithmetic on void pointer
+    tot_read = 0;
+
+    while (len != 0 && (nr = read(sock_fd, buf, len)) != 0) {
+        if (nr < 0) {
+            if (errno == EINTR) {
+                continue;
+            } else {
+                return -1;
+            }
+        }
+        len -= nr;
+        buf += nr;
+        tot_read += nr;
+    }
+
+    return tot_read;
+}
+
+void
+pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
+{
+    doca_error_t result;
+
+    /* Initialize rdma_config */
+    set_default_config_value(cfg);
+
+    /* Parse cmdline/json arguments */
+    result = doca_argp_init("rdma client", cfg);
+    if (result != DOCA_SUCCESS)
+        DOCA_LOG_ERR("Worker [%ld] failed to init ARGP resources: %s", proc_id, doca_error_get_descr(result));
+
+    result = register_rdma_common_params();
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Worker [%ld] failed to register RDMA client parameters: %s", proc_id, doca_error_get_descr(result));
+        doca_argp_destroy();
+    }
+
+    char *argv[] = {
+        "dummy",
+        "-d", "mlx5_0",
+        "-n", "1000",
+        "-s", "1024",
+        "-a", "128.110.219.82",
+        "-p", "8080"
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    result = doca_argp_start(argc, argv);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to parse sample input: %s", doca_error_get_descr(result));
+        doca_argp_destroy();
+    }
+
+    DOCA_LOG_INFO("Print RDMA config:");
+    DOCA_LOG_INFO("DOCA Device Name: %s", cfg->device_name);
+    DOCA_LOG_INFO("DNE socket IP: %s", cfg->sock_ip);
+    DOCA_LOG_INFO("DNE socket port: %d", cfg->sock_port);
+    DOCA_LOG_INFO("Message size: %u", cfg->msg_sz);
+    DOCA_LOG_INFO("Number of Messages: %u", cfg->n_msg);
+
+    /* Establish connection with backend DNEs to exchange RC metadata */
+    cfg->sock_fd = pdin_rdma_ctrl_path_client_connect(cfg->sock_ip, (uint16_t) cfg->sock_port);
+    if (cfg->sock_fd == -1) {
+        DOCA_LOG_INFO("Worker [%ld] failed to connect with the DNE. Closing DOCA RDMA...", proc_id);
+        exit(1);
+    }
+
+    DOCA_LOG_INFO("Worker [%ld] established connection with the DNE", proc_id);
+}
+
+void
+pdin_rdma_send(void *ngx_http_request_pt, void *pdin_rdma_handler_pt,
+               void *pdin_rdma_handler_log_pt, void *ngx_http_request_mempool_pt)
+{
+    doca_error_t result;
+    struct doca_rdma_task_send_imm *send_task;
+    struct pdin_rdma_md_s *md;
+    struct rdma_resources *resources = (struct rdma_resources *) ngx_cycle->rdma_resources;
+
+    /* Allocate and construct RDMA send task */
+    result = doca_buf_get_data(resources->src_buf, (void **) &md);
+    if (result != DOCA_SUCCESS) {
+        printf("Worker [%u] failed to get buf data: %s\n",
+                        resources->id, doca_error_get_descr(result));
+    }
+
+    md->ngx_http_request_pt = ngx_http_request_pt; /* pointer to received HTTP request */
+    md->pdin_rdma_handler_pt = pdin_rdma_handler_pt; /* pointer to callback handler */
+    md->pdin_rdma_handler_log_pt = pdin_rdma_handler_log_pt; /* pointer to handler log */
+    md->ngx_http_request_mempool_pt = ngx_http_request_mempool_pt; /* pointer to request mempool */
+    // DOCA_LOG_INFO("Sent PDIN RDMA header: [r:%p] [handler:%p] [rlog:%p] [mp:%p]",
+    //         ngx_http_request_pt, pdin_rdma_handler_pt, pdin_rdma_handler_log_pt, ngx_http_request_mempool_pt);
+
+    union doca_data task_user_data;
+    task_user_data.ptr = &resources->first_encountered_error;
+
+    result = submit_send_imm_task(resources->rdma, resources->connections[resources->id],
+                                  resources->src_buf, 0, task_user_data,
+                                  &send_task);
+    if (result != DOCA_SUCCESS) {
+        printf("Worker [%u] failed to submit send_imm task: %s\n",
+                        resources->id, doca_error_get_descr(result));
+    }
 }

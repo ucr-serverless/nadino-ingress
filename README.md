@@ -101,6 +101,10 @@ tail -f /usr/local/nginx_fstack/logs/error.log
 
 # Modify F-stack configuration
 sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
+
+# Important Note:
+# F-stack has 100us TX packet delay time (pkt_tx_delay) while send less than 32 pkts.
+# This affects RPS and latency performance at low concurrency.
 ```
 
 NGINX documentation is available at http://nginx.org

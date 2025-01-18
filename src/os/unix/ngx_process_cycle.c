@@ -11,7 +11,9 @@
 #include <ngx_channel.h>
 
 #include "pdi_rdma.h"
-
+#include <doca_log.h>
+#include "rdma_common_doca.h"
+DOCA_LOG_REGISTER(WORKER::PROCESS_CYCLE);
 
 static void ngx_start_worker_processes(ngx_cycle_t *cycle, ngx_int_t n,
     ngx_int_t type);
@@ -481,7 +483,7 @@ ngx_start_worker_processes(ngx_cycle_t *cycle, ngx_int_t n, ngx_int_t type)
 
     for (i = 0; i < n; i++) {
 
-        printf("\n\n##### Starting NGINX worker (%ld) #####\n", i);
+        printf("\n##### Starting NGINX worker (%ld) #####\n", i);
 
         ngx_spawn_process(cycle, ngx_worker_process_cycle,
                           (void *) (intptr_t) i, "worker process", type);
@@ -867,41 +869,6 @@ ngx_master_process_exit(ngx_cycle_t *cycle)
     exit(0);
 }
 
-static void
-pdin_rdma_rx_procedure(ngx_cycle_t *cycle)
-{
-    struct pdin_rdma_md_s *md = pdin_rdma_read_rte_ring(ngx_worker);
-    if (md == NULL) {
-        return; // No mds in the RTE Ring
-    }
-
-    void *r = md->ngx_http_request_pt;
-    void *handler = md->pdin_rdma_handler_pt;
-    void *log = md->pdin_rdma_handler_log_pt;
-
-    // printf("++ pdin_rdma_rx_procedure ++ r: %p \t handler: %p \t log: %p\n", r, handler, log);
-
-    // NOTE: resue the pool in r
-    ngx_pool_t *pool = ngx_create_pool(4096, cycle->log);
-    if (pool == NULL) {
-        return;
-    }
-
-    ngx_event_t *ev = ngx_pcalloc(pool, sizeof(ngx_event_t));
-    if (ev == NULL) {
-        ngx_destroy_pool(pool);
-        return;
-    }
-
-    ev->handler = (ngx_event_handler_pt) handler;
-    ev->data = r;
-    ev->log = (ngx_log_t*) log;
-
-    ngx_post_event(ev, &ngx_posted_events);
-
-    pdin_rdma_md_free(md);
-}
-
 #if (NGX_HAVE_FSTACK)
 static int
 ngx_worker_process_cycle_loop(void *arg)
@@ -917,7 +884,20 @@ ngx_worker_process_cycle_loop(void *arg)
 
     // ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0, "worker cycle");
 
-    pdin_rdma_rx_procedure(cycle); // NOTE: Consume RTE RING for events to be posted
+    struct rdma_resources *resources = (struct rdma_resources *) cycle->rdma_resources;
+    // doca_pe_progress(resources->pe);
+
+    /* TODO: revisit the performance impact of while loop here */
+    while (1) {
+        /* If doca_pe_progress() returns 1, it means progress is being made (i.e., some task completed or some event handled). */
+        if (doca_pe_progress(resources->pe) == 1) {
+            // printf("doca_pe_progress has events.\n");
+            continue;
+        } else {
+            // printf("doca_pe_progress has no events.\n");
+            break;
+        }
+    }
 
     ngx_process_events_and_timers(cycle);
 
@@ -957,13 +937,18 @@ ngx_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     ngx_process = NGX_PROCESS_WORKER;
     ngx_worker = worker;
 
-    // Note: Can we create RC connections here?
+    /* Init. DOCA RDMA params */
+    struct rdma_config cfg;
+    (void) pdin_init_rdma_config(&cfg, ngx_worker);
+
+    /* Initialize DOCA RDMA context and device */
+    pdin_init_doca_rdma_client_ctx(ngx_worker, &cfg, cycle);
 
     ngx_worker_process_init(cycle, worker);
 
     ngx_setproctitle("worker process");
 
-    pdin_init_md_rings(cycle); // pdin_init_worker_rings(cycle);
+    // pdin_init_md_rings(cycle);
 
 #if (NGX_HAVE_FSTACK)
     ff_run(ngx_worker_process_cycle_loop, (void *)cycle);

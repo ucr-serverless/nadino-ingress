@@ -1135,7 +1135,8 @@ pdin_rdma_recv_handler(ngx_event_t *ev) {
 
 
 static void
-pdin_rdma_send_handler(ngx_http_request_t *r) {
+pdin_rdma_send_handler(ngx_http_request_t *r)
+{
     if (r->method == NGX_HTTP_POST || r->method == NGX_HTTP_PUT) {
         if (r->request_body == NULL || r->request_body->bufs == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Failed to read request body.");
@@ -1147,60 +1148,35 @@ pdin_rdma_send_handler(ngx_http_request_t *r) {
         ngx_buf_t *buf = r->request_body->bufs->buf;
         if (buf && buf->pos) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
-                        "2nd Request Body: %*s", buf->last - buf->pos, buf->pos);
+                        "Request Body: %*s", buf->last - buf->pos, buf->pos);
         }
     }
 
-    // Note: write RTE RING and return
-    // ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,  "+++++ Write RTE RING and return +++++");
-    // ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, " +++++ r: %p \t pdin_rdma_recv_handler: %p \t r->connection->log: %p", r, pdin_rdma_recv_handler, r->connection->log);
-
-    struct pdin_rdma_md_s *md = pdin_rdma_md_alloc();
-    md->ngx_http_request_pt = (void *)r; /* pointer to received HTTP request */
-    md->pdin_rdma_handler_pt = (void *)pdin_rdma_recv_handler; /* pointer to callback handler */
-    md->pdin_rdma_handler_log_pt = (void*)r->connection->log;/* pointer to handler log */
-    pdin_rdma_write_rte_ring(ngx_worker, md);
+    pdin_rdma_send((void *)r, (void *)pdin_rdma_recv_handler, (void*)r->connection->log, (void*)r->pool);
 
     return;
 }
 
-
 static ngx_int_t
-pdin_rdma_proxy_request_handler(ngx_http_request_t *r) {
-
-    // ngx_http_core_loc_conf_t  *clcf;
-    // clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-    // pdin_rdma_address_t *addresses = clcf->prcf.pdin_rdma_addresses;
-
-    // for (ngx_uint_t i = 0; i < clcf->prcf.pdin_rdma_addresses_count; i++) {
-    //     printf("Parsed IP: %.*s\n", (int)addresses[i].ip.len, addresses[i].ip.data);
-    //     printf("Parsed port: %lu\n", addresses[i].port);
-    // }
-
+pdin_rdma_proxy_request_handler(ngx_http_request_t *r)
+{
     // log_request_url_and_method(r);
     // log_request_header(r);
 
-    // Check if the request body needs to be read
+    /* HTTP POST/PUT has request body to be read */
     if (r->method == NGX_HTTP_POST || r->method == NGX_HTTP_PUT) {
         if (r->request_body == NULL) {
             return ngx_http_read_client_request_body(r, pdin_rdma_send_handler);
         }
-
-        // Print request body content
-        // ngx_buf_t *buf = r->request_body->bufs->buf;
-        // if (buf && buf->pos) {
-        //     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
-        //                   "1st Request Body: %*s", buf->last - buf->pos, buf->pos);
-        // }
     }
 
     return ngx_http_read_client_request_body(r, pdin_rdma_send_handler);
 }
 
-
-// Parsing function: extract multiple IPs and ports
+/* PDIN helper to parse worker node addresses from the location conf */
 static ngx_int_t
-pdin_rdma_parse_worker_addr(ngx_str_t *value, pdin_rdma_address_t *addresses, ngx_uint_t *n) {
+pdin_rdma_parse_worker_addr(ngx_str_t *value, pdin_rdma_address_t *addresses, ngx_uint_t *n)
+{
     u_char *start = value->data;
     u_char *end = value->data + value->len;
     u_char *current;
