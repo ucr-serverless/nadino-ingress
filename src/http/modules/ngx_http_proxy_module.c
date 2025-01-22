@@ -1202,21 +1202,16 @@ pdin_create_response(const char* response, ngx_http_request_t *r)
 }
 
 void
-pdin_rdma_recv_handler(ngx_event_t *ev) {
+pdin_rdma_recv_handler(ngx_event_t *ev)
+{
     ngx_http_request_t *r = (ngx_http_request_t *)ev->data;
 
     if (r->connection->destroyed) {
-        // log_request_url_and_method(r);
-        // log_request_header(r);
-
-        printf("event pt: [%p], req pt: [%p], c: [%p], con_id: [%lu]\n", ev, r, r->connection, r->connection->log->connection);
         pdin_check_request_state(r);
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Connection already destroyed");
 
-        r->connection->close = 1;  // 禁止重用连接
-         ngx_http_close_request(r, NGX_HTTP_BAD_REQUEST);
-        r->connection->error = 1;  // 标记连接为错误
-        // ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        r->connection->close = 1;
+        r->connection->error = 1;
 
         // ngx_free(ev);
         return;
@@ -1267,11 +1262,11 @@ pdin_rdma_proxy_request_handler(ngx_http_request_t *r)
         printf("!!! r pool is null \n");
 
     pdin_rdma_send((void *)r, (void *)pdin_rdma_recv_handler, (void*)r->connection->log, (void*)r->pool);
-    // pdin_rdma_send((void *)r, (void *)pdin_rdma_recv_handler, (void*)r->connection->log, (void*)r->connection->pool);
 
     r->count++;
-    // return ngx_http_read_client_request_body(r, pdin_rdma_send_handler);
     return NGX_DONE;
+
+    // return ngx_http_read_client_request_body(r, pdin_rdma_send_handler);
 }
 
 /* PDIN helper to parse worker node addresses from the location conf */

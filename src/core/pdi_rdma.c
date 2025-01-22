@@ -14,109 +14,6 @@
 
 #include <ngx_http.h>
 
-////////////////
-#define TABLE_SIZE 12  // 哈希表大小，根据需求调整
-
-typedef struct KVNode {
-    void *id;             // Key: 指针地址
-    int counter;          // Value: 计数器
-    struct KVNode *next;  // 链地址法处理冲突
-} KVNode;
-
-typedef struct HashTable {
-    KVNode *buckets[TABLE_SIZE];
-} HashTable;
-
-// 哈希函数
-unsigned int hash_function(void *id) {
-    return ((uintptr_t)id) % TABLE_SIZE;  // 将指针地址转为整数后取模
-}
-
-// 创建哈希表
-HashTable *create_table() {
-    HashTable *table = (HashTable *)malloc(sizeof(HashTable));
-    if (!table) {
-        perror("Failed to allocate memory for HashTable");
-        exit(EXIT_FAILURE);
-    }
-    memset(table->buckets, 0, sizeof(table->buckets));
-    return table;
-}
-
-// 查找或插入ID
-void process_id(HashTable *table, void *id) {
-    unsigned int index = hash_function(id);
-    KVNode *current = table->buckets[index];
-
-    // 遍历链表查找是否已经存在
-    while (current) {
-        if (current->id == id) {  // 如果找到相同的指针地址
-            current->counter++;  // 计数器加1
-            return;
-        }
-        current = current->next;
-    }
-
-    // 如果不存在，创建新的节点并插入链表头部
-    KVNode *new_node = (KVNode *)malloc(sizeof(KVNode));
-    if (!new_node) {
-        perror("Failed to allocate memory for KVNode");
-        exit(EXIT_FAILURE);
-    }
-    new_node->id = id;
-    new_node->counter = 1;
-    new_node->next = table->buckets[index];
-    table->buckets[index] = new_node;
-}
-
-// 获取指定ID的计数器值
-int get_counter(HashTable *table, void *id) {
-    unsigned int index = hash_function(id);
-    KVNode *current = table->buckets[index];
-
-    // 遍历链表查找ID
-    while (current) {
-        if (current->id == id) {  // 找到目标ID
-            return current->counter;
-        }
-        current = current->next;
-    }
-
-    return -1;  // 如果未找到ID，返回-1
-}
-
-// 打印哈希表内容
-void print_table(HashTable *table) {
-    for (int i = 0; i < TABLE_SIZE; i++) {
-        KVNode *current = table->buckets[i];
-        if (current) {
-            printf("Bucket %d: ", i);
-            while (current) {
-                printf("(ID: %p, Count: %d) -> ", current->id, current->counter);
-                current = current->next;
-            }
-            printf("NULL\n");
-        }
-    }
-}
-
-// 销毁哈希表并释放内存
-void destroy_table(HashTable *table) {
-    for (int i = 0; i < TABLE_SIZE; i++) {
-        KVNode *current = table->buckets[i];
-        while (current) {
-            KVNode *temp = current;
-            current = current->next;
-            free(temp);
-        }
-    }
-    free(table);
-}
-
-HashTable *rx_table;
-HashTable *tx_table;
-////////////////
-
 DOCA_LOG_REGISTER(WORKER::PDI_RDMA);
 struct doca_log_backend *sdk_log;
 
@@ -144,6 +41,7 @@ static struct rte_mempool *md_pool;
 uint32_t NUM_BUFS_PER_PDIN_WORKER_PROCESS = DEFAULT_RDMA_TASK_NUM;
 struct doca_buf_pool* pdin_buf_pool;
 int rdma_ctrl_path_sockfd;
+struct rdma_resources *pdin_send_resources;
 
 /* Note: can be integrated with ff_msg
  * But it will require changing f-stack
@@ -544,6 +442,40 @@ pdin_rdma_read_rte_ring(ngx_int_t proc_id)
     return md;
 }
 
+doca_error_t
+pdin_allocate_doca_mmap(const uint32_t mmap_permissions, struct rdma_resources *resources, uint32_t m_size)
+{
+    doca_error_t result;
+
+    /* Allocate memory for memory range */
+    if (m_size == 0) {
+        DOCA_LOG_ERR("Requested Memory Size is Zero.");
+        return DOCA_ERROR_NO_MEMORY;
+    }
+
+    resources->mmap_memrange = calloc(m_size, sizeof(char));
+    if (resources->mmap_memrange == NULL) {
+        result = DOCA_ERROR_NO_MEMORY;
+        DOCA_LOG_ERR("Failed to allocate memory for mmap_memrange: %s", doca_error_get_descr(result));
+        return result;
+    }
+
+    /* Create mmap with allocated memory */
+    result = create_local_mmap(&(resources->mmap), mmap_permissions, (void *)resources->mmap_memrange, m_size,
+                               resources->doca_device);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to create DOCA mmap: %s", doca_error_get_descr(result));
+        goto free_memrange;
+    }
+    DOCA_LOG_INFO("mmap range is %p", resources->mmap_memrange);
+
+    return result;
+
+free_memrange:
+    free(resources->mmap_memrange);
+    return result;
+}
+
 static void 
 PDIN_LOG_RDMA_HEADER(struct doca_buf *buf)
 {
@@ -733,14 +665,12 @@ pdin_send_http_response(const char* response, ngx_http_request_t *r)
 }
 
 static void
-pdin_rdma_recv_handler(ngx_http_request_t *r) {
-DOCA_LOG_ERR("req pt: [%p], c: [%p], con_id: [%lu]", r, r->connection, r->connection->log->connection);
+pdin_rdma_recv_handler(ngx_http_request_t *r)
+{
     if (r->connection->destroyed) {
-        // DOCA_LOG_ERR("req pt: [%p], c: [%p], con_id: [%lu]", r, r->connection, r->connection->log->connection);
         r->connection->close = 1;
         r->connection->error = 1;
-        // ngx_http_close_request(r, NGX_HTTP_BAD_REQUEST);
-
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Connection already destroyed");
         return;
     }
 
@@ -756,18 +686,7 @@ pdin_rdma_post_http_response(struct pdin_rdma_md_s *md)
     void *r = md->ngx_http_request_pt;
     // void *handler = md->pdin_rdma_handler_pt;
     // void *log = md->pdin_rdma_handler_log_pt;
-    void *pool = md->ngx_http_request_mempool_pt;
-
-process_id(tx_table, r);
-if (get_counter(tx_table, r) != get_counter(rx_table, r)) {
-    DOCA_LOG_INFO("[%p] reports mismatched (RX:TX) rate: [%d]:[%d]", r, get_counter(rx_table, r), get_counter(tx_table, r));
-    sleep(100);
-}
-
-    ngx_http_request_t *req = (ngx_http_request_t *)r;
-
-    if (req->pool == NULL)
-        DOCA_LOG_ERR("Hanged pool: [%p]", pool);
+    // void *pool = md->ngx_http_request_mempool_pt;
 
     pdin_rdma_recv_handler((ngx_http_request_t *)r);
 
@@ -801,13 +720,10 @@ pdin_rdma_send(void *ngx_http_request_pt, void *pdin_rdma_handler_pt,
     // DOCA_LOG_INFO("Sent PDIN RDMA header: [r:%p] [handler:%p] [rlog:%p] [mp:%p]",
     //         ngx_http_request_pt, pdin_rdma_handler_pt, pdin_rdma_handler_log_pt, ngx_http_request_mempool_pt);
 
-process_id(rx_table, ngx_http_request_pt);
-// DOCA_LOG_INFO("RX counter [%p]:[%d]", ngx_http_request_pt, get_counter(rx_table, ngx_http_request_pt));
-
     union doca_data task_user_data;
     task_user_data.ptr = &resources->first_encountered_error;
 
-    result = submit_send_imm_task_retry(resources->rdma, resources->connections[resources->id],
+    result = submit_send_imm_task(resources->rdma, resources->connections[resources->id],
                                   send_buf, 0, task_user_data, &send_task);
     if (result != DOCA_SUCCESS) {
         printf("Worker [%u] failed to submit send_imm task: %s\n",
@@ -823,10 +739,10 @@ pdin_send_imm_completed_callback(struct doca_rdma_task_send_imm *send_task,
     struct doca_buf *send_buf = (struct doca_buf *)doca_rdma_task_send_imm_get_src_buf(send_task);
     // (void)PDIN_LOG_RDMA_HEADER(send_buf);
 
-    pdin_dec_buf_refcount(send_buf);
     // DOCA_LOG_INFO("The reference count of the send_buf: %u", pdin_dec_buf_refcount(send_buf));
 
     doca_task_free(doca_rdma_task_send_imm_as_task(send_task));
+    pdin_dec_buf_refcount(send_buf);
 }
 
 void
@@ -923,6 +839,8 @@ local_rdma_conn_recv_and_send(struct rdma_resources* resources)
     result = init_inventory(&resources->buf_inventory, inv_num);
     JUMP_ON_DOCA_ERROR(result, error);
 
+    result = init_inventory(&pdin_send_resources->buf_inventory, inv_num);
+    JUMP_ON_DOCA_ERROR(result, error);
     DOCA_LOG_INFO("Worker [%u]'s RDMA client context is running", resources->id);
 
     DOCA_LOG_INFO("Worker [%u] waits for ACK from the DNE", resources->id);
@@ -959,10 +877,10 @@ local_rdma_conn_recv_and_send(struct rdma_resources* resources)
 
     /* Allocate buffers for the send task */
     size_t num_elements = (size_t) NUM_BUFS_PER_PDIN_WORKER_PROCESS;
-    size_t element_size = (size_t) resources->cfg->msg_sz;
-    result = pdin_doca_mempool_create(num_elements, element_size, &pdin_buf_pool, resources->mmap, resources->id);
+    size_t element_size = (size_t) pdin_send_resources->cfg->msg_sz;
+    result = pdin_doca_mempool_create(num_elements, element_size, &pdin_buf_pool, pdin_send_resources->mmap, pdin_send_resources->id);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_INFO("Worker [%u] failed to create DOCA mempool: %s", resources->id, doca_error_get_descr(result));
+        DOCA_LOG_INFO("Worker [%u] failed to create DOCA mempool: %s", pdin_send_resources->id, doca_error_get_descr(result));
         return result;
     }
 
@@ -1044,6 +962,19 @@ pdin_init_doca_rdma_client_ctx(ngx_int_t proc_id, void *cfg, ngx_cycle_t *cycle)
                                      resources, total_memrange_size, (uint16_t) 1);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_INFO("Worker [%ld] failed to allocate RDMA Resources: %s",
+                        proc_id, doca_error_get_descr(result));
+        return;
+    }
+
+    /* Allocate memory resources for send tasks */
+    pdin_send_resources = malloc(sizeof(struct rdma_resources));
+    memset(pdin_send_resources, 0, sizeof(struct rdma_resources));
+    pdin_send_resources->id = proc_id;
+    pdin_send_resources->cfg = config;
+    pdin_send_resources->doca_device = resources->doca_device;
+    result = pdin_allocate_doca_mmap(mmap_permissions, pdin_send_resources, total_memrange_size);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Worker [%ld] failed to allocate Send Resources: %s",
                         proc_id, doca_error_get_descr(result));
         return;
     }
@@ -1208,9 +1139,6 @@ pdin_rdma_ctrl_path_client_read(int sock_fd, void *buffer, size_t len)
 void
 pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
 {
-    rx_table = create_table();
-    tx_table = create_table();
-
     doca_error_t result;
 
     /* Initialize rdma_config */
