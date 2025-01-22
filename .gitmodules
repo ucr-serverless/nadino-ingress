@@ -4,3 +4,6 @@
 [submodule "RDMA_lib"]
 	path = RDMA_lib
 	url = https://github.com/ucr-serverless/RDMA_lib.git
+[submodule "DOCA_lib"]
+	path = DOCA_lib
+	url = https://github.com/ucr-serverless/DOCA_lib.git

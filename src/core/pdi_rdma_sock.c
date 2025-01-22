@@ -27,6 +27,9 @@
 #include <unistd.h>
 
 #include "pdi_rdma_sock.h"
+
+ngx_log_t * rdma_log;
+
 ssize_t sock_utils_read(int sock_fd, void *buffer, ssize_t len)
 {
     ssize_t nr, tot_read;
@@ -221,4 +224,112 @@ int set_socket_nonblocking(int sockfd)
         return -1;
     }
     return 0;
+}
+
+
+/* Simple hash table for counting */
+#define TABLE_SIZE 12
+
+typedef struct KVNode {
+    void *id;
+    int counter;
+    struct KVNode *next;
+} KVNode;
+
+typedef struct HashTable {
+    KVNode *buckets[TABLE_SIZE];
+} HashTable;
+
+unsigned int
+hash_function(void *id)
+{
+    return ((uintptr_t)id) % TABLE_SIZE;  // Modulo after converting the pointer address to an integer
+}
+
+HashTable *
+create_table()
+{
+    HashTable *table = (HashTable *)malloc(sizeof(HashTable));
+    if (!table) {
+        perror("Failed to allocate memory for HashTable");
+        exit(EXIT_FAILURE);
+    }
+    memset(table->buckets, 0, sizeof(table->buckets));
+    return table;
+}
+
+void
+process_id(HashTable *table, void *id)
+{
+    unsigned int index = hash_function(id);
+    KVNode *current = table->buckets[index];
+
+    while (current) {
+        if (current->id == id) {
+            current->counter++;
+            return;
+        }
+        current = current->next;
+    }
+
+    // If it does not exist, create a new node and insert it at the head of the list.
+    KVNode *new_node = (KVNode *)malloc(sizeof(KVNode));
+    if (!new_node) {
+        perror("Failed to allocate memory for KVNode");
+        exit(EXIT_FAILURE);
+    }
+    new_node->id = id;
+    new_node->counter = 1;
+    new_node->next = table->buckets[index];
+    table->buckets[index] = new_node;
+}
+
+// Retrieve the counter value for the specified ID
+int
+get_counter(HashTable *table, void *id)
+{
+    unsigned int index = hash_function(id);
+    KVNode *current = table->buckets[index];
+
+    // Traverse the linked list to find the ID
+    while (current) {
+        if (current->id == id) {  // Find target ID
+            return current->counter;
+        }
+        current = current->next;
+    }
+
+    return -1;  // Return -1 if the ID is not found.
+}
+
+// Print table contents
+void
+print_table(HashTable *table)
+{
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        KVNode *current = table->buckets[i];
+        if (current) {
+            printf("Bucket %d: ", i);
+            while (current) {
+                printf("(ID: %p, Count: %d) -> ", current->id, current->counter);
+                current = current->next;
+            }
+            printf("NULL\n");
+        }
+    }
+}
+
+// Destroy hash table and free memory
+void
+destroy_table(HashTable *table)
+{
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        KVNode *current = table->buckets[i];
+        while (current) {
+            KVNode *temp = current;
+            current = current->next;
+            free(temp);
+        }
+    }
+    free(table);
 }

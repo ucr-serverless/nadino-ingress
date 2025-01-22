@@ -40,6 +40,8 @@ struct ngx_cycle_s {
     void                  ****conf_ctx;
     ngx_pool_t               *pool;
 
+    void                     *rdma_resources; /* PDIN DOCA RDMA resources */
+
     ngx_log_t                *log;
     ngx_log_t                 new_log;
 

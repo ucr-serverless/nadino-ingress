@@ -29,7 +29,7 @@ conda activate ingress
 # Install build dependencies (TODO: remove unnecessary deps)
 sudo apt update && sudo apt install -y flex bison build-essential dwarves libssl-dev libelf-dev \
                     libnuma-dev pkg-config python3-pip python3-pyelftools \
-                    libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev
+                    libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev libglib2.0-dev
 
 pip3 install meson ninja
 pip3 install pyelftools --upgrade
@@ -76,16 +76,67 @@ make -j
 sudo make install
 ```
 
+## Build RDMA Lib
+```bash
+cd ~/palladium-ingress/RDMA_lib
+make
+```
+
+## Build DOCA Lib
+```bash
+cd ~/
+
+# Install DOCA packages (v2.9.1)
+wget https://www.mellanox.com/downloads/DOCA/DOCA_v2.9.1/host/doca-host_2.9.1-018000-24.10-ubuntu2204_amd64.deb
+sudo dpkg -i doca-host_2.9.1-018000-24.10-ubuntu2204_amd64.deb
+sudo apt-get update
+sudo apt-get -y install doca-all
+
+# Install DOCA Lib
+cd ~/palladium-ingress/DOCA_lib
+meson /tmp/doca_lib
+ninja -C /tmp/doca_lib
+```
 ## Build Palladium Ingress (NGINX)
 ```bash
 cd ~/palladium-ingress/
 bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
-
-# NOTE: add "-mssse3" to CFLAGS in objs/Makefile
 # For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
 
 make -j
 sudo make install
+
+# NOTE: Add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile
+objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
+	src/core/pdi_rdma.c
+	$(CC) -c $(CFLAGS) $(CORE_INCS) $(HTTP_INCS) \
+		-o objs/src/core/pdi_rdma.o \
+		src/core/pdi_rdma.c
+```
+
+## Enable HTTP-RDMA adaptor in Palladium Ingress
+We use the NGINX location block to enable HTTP-RDMA adaptor. The command used for HTTP-RDMA adaptor is `palladium_ingress`. The command used for the regular HTTP reverse proxy is still `proxy_pass`. An example configuration of HTTP-RDMA adaptor is shown below:
+```
+http {
+    ...
+    server {
+        ...
+
+        # We use comma to seperate worker node addresses
+        # NOTE: We currently don't use worker node addresses
+        location /rdma {
+            palladium_ingress 10.10.1.2:80,10.10.1.3:80,10.10.1.4:8080;
+        }
+
+        # location block config for regular HTTP reverse proxy
+        location /fstack {
+            proxy_pass http://10.10.1.2:80/;
+        }
+
+        ...
+    }
+    ...
+}
 ```
 
 ## Test Palladium Ingress
@@ -96,8 +147,15 @@ sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
 # Print logs of NGINX
 sudo cat /var/log/syslog | grep "f-stack"
 
+# Print NGINX Runtime Logs
+tail -f /usr/local/nginx_fstack/logs/error.log
+
 # Modify F-stack configuration
 sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
+
+# Important Note:
+# F-stack has 100us TX packet delay time (pkt_tx_delay) while send less than 32 pkts.
+# This affects RPS and latency performance at low concurrency.
 ```
 
 NGINX documentation is available at http://nginx.org
