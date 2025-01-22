@@ -53,4 +53,5 @@ int pdin_rdma_ctrl_path_client_connect(char *server_ip, uint16_t server_port);
 ssize_t pdin_rdma_ctrl_path_client_read(int sock_fd, void *buffer, size_t len);
 void pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id);
 void pdin_rdma_send(void *ngx_http_request_pt, void *pdin_rdma_handler_pt, void *pdin_rdma_handler_log_pt, void *ngx_http_request_mempool_pt);
+doca_error_t pdin_create_doca_log_backend(void);
 #endif /* PDI_RDMA_H */

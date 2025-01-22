@@ -937,6 +937,9 @@ ngx_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     ngx_process = NGX_PROCESS_WORKER;
     ngx_worker = worker;
 
+    /* Init. DOCA Log Backend */
+    pdin_create_doca_log_backend();
+
     /* Init. DOCA RDMA params */
     struct rdma_config cfg;
     (void) pdin_init_rdma_config(&cfg, ngx_worker);
@@ -947,8 +950,6 @@ ngx_worker_process_cycle(ngx_cycle_t *cycle, void *data)
     ngx_worker_process_init(cycle, worker);
 
     ngx_setproctitle("worker process");
-
-    // pdin_init_md_rings(cycle);
 
 #if (NGX_HAVE_FSTACK)
     ff_run(ngx_worker_process_cycle_loop, (void *)cycle);

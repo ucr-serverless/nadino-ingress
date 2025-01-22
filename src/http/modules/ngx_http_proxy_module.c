@@ -1089,48 +1089,144 @@ log_request_header(ngx_http_request_t *r)
     }
 }
 
+void pdin_check_request_state(ngx_http_request_t *r) {
+    if (r == NULL) {
+        printf("Request is NULL\n");
+        return;
+    }
+
+    printf("Checking request state:\n");
+
+    ngx_connection_t *c = r->connection;
+    if (c == NULL) {
+        printf("Connection is NULL\n");
+        return;
+    }
+
+    printf("Connection state:\n");
+    printf("  data: %p\n", c->data);
+    printf("  destroyed: %d\n", c->destroyed);
+    printf("  fd: %d\n", c->fd);
+    printf("  error: %d\n", c->error);
+    printf("  timedout: %d\n", c->timedout);
+    printf("  close: %d\n", c->close);
+    printf("  reusable: %d\n", c->reusable);
+
+    if (r->pool != NULL) {
+        printf("r->pool: [%p]\n", r->pool);
+    } else {
+        printf("request mempool is NULL!\n");
+    }
+
+    if (r->request_body == NULL) {
+        printf("Request body is NULL\n");
+    } else {
+        printf("Request body exists:\n");
+        printf("  bufs: %p\n", r->request_body->bufs);
+    }
+
+    if (r->ctx == NULL) {
+        printf("Request context (ctx) is NULL\n");
+    } else {
+        printf("Request context (ctx) exists\n");
+    }
+
+    if (c->pool == NULL) {
+        printf("Connection pool is NULL\n");
+    } else {
+        printf("Connection pool exists\n");
+    }
+
+    if (c->read == NULL) {
+        printf("Connection read event is NULL\n");
+    } else {
+        printf("Connection read event exists:\n");
+        printf("  active: %d\n", c->read->active);
+        printf("  ready: %d\n", c->read->ready);
+        printf("  timedout: %d\n", c->read->timedout);
+        printf("  handler: %p\n", c->read->handler);
+    }
+
+    if (c->write == NULL) {
+        printf("Connection write event is NULL\n");
+    } else {
+        printf("Connection write event exists:\n");
+        printf("  active: %d\n", c->write->active);
+        printf("  ready: %d\n", c->write->ready);
+        printf("  timedout: %d\n", c->write->timedout);
+        printf("  handler: %p\n", c->write->handler);
+    }
+
+    printf("Request is done: %u\n", r->done);
+
+    printf("Request reference count: %d\n", r->count);
+}
+
+void
+pdin_create_response(const char* response, ngx_http_request_t *r)
+{
+    ngx_buf_t *b;
+    ngx_chain_t out;
+
+    if (response == NULL || ngx_strlen(response) == 0) {
+        r->headers_out.status = NGX_HTTP_OK;
+        r->headers_out.content_length_n = 0;
+        r->header_only = 1;
+
+        ngx_http_send_header(r);
+        ngx_http_finalize_request(r, NGX_DONE);
+    } else {
+        r->headers_out.status = NGX_HTTP_OK;
+        r->headers_out.content_length_n = ngx_strlen(response);
+        r->headers_out.content_type.len = sizeof("text/plain") - 1;
+        r->headers_out.content_type.data = (u_char *)"text/plain";
+
+        b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+        if (b == NULL) {
+            ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+            return;
+        }
+
+        b->pos = (u_char *)response;
+        b->last = b->pos + ngx_strlen(response);
+        b->memory = 1;
+        b->last_buf = 1;
+
+        out.buf = b;
+        out.next = NULL;
+
+        ngx_http_send_header(r);
+        ngx_http_output_filter(r, &out);
+        ngx_http_finalize_request(r, NGX_DONE);
+    }
+}
 
 void
 pdin_rdma_recv_handler(ngx_event_t *ev) {
     ngx_http_request_t *r = (ngx_http_request_t *)ev->data;
 
-    // ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Pointer of r: %p", r);
-    // ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "+++++ pdin_rdma_recv_handler +++++");
-    // log_request_url_and_method(r);
-    // log_request_header(r);
-
     if (r->connection->destroyed) {
-        ngx_log_error(NGX_LOG_ERR, ev->log, 0, "Connection already destroyed");
+        // log_request_url_and_method(r);
+        // log_request_header(r);
+
+        printf("event pt: [%p], req pt: [%p], c: [%p], con_id: [%lu]\n", ev, r, r->connection, r->connection->log->connection);
+        pdin_check_request_state(r);
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Connection already destroyed");
+
+        r->connection->close = 1;  // 禁止重用连接
+         ngx_http_close_request(r, NGX_HTTP_BAD_REQUEST);
+        r->connection->error = 1;  // 标记连接为错误
+        // ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+
+        // ngx_free(ev);
         return;
     }
+    // ngx_free(ev);
 
-    // Construct and send response
-    ngx_buf_t *b;
-    ngx_chain_t out;
-    const char *response = "Request body logged.\n";
+    const char *response = "";
+    pdin_create_response(response, r); /* Construct and send response */
 
-    r->headers_out.status = NGX_HTTP_OK;
-    r->headers_out.content_length_n = ngx_strlen(response);
-    r->headers_out.content_type.len = sizeof("text/plain") - 1;
-    r->headers_out.content_type.data = (u_char *)"text/plain";
-
-    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
-    if (b == NULL) {
-        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
-        return;
-    }
-
-    b->pos = (u_char *)response;
-    b->last = b->pos + ngx_strlen(response);
-    b->memory = 1;
-    b->last_buf = 1;
-
-    out.buf = b;
-    out.next = NULL;
-
-    ngx_http_send_header(r);
-    ngx_http_output_filter(r, &out);
-    ngx_http_finalize_request(r, NGX_DONE);
+    return;
 }
 
 
@@ -1160,9 +1256,6 @@ pdin_rdma_send_handler(ngx_http_request_t *r)
 static ngx_int_t
 pdin_rdma_proxy_request_handler(ngx_http_request_t *r)
 {
-    // log_request_url_and_method(r);
-    // log_request_header(r);
-
     /* HTTP POST/PUT has request body to be read */
     if (r->method == NGX_HTTP_POST || r->method == NGX_HTTP_PUT) {
         if (r->request_body == NULL) {
@@ -1170,7 +1263,15 @@ pdin_rdma_proxy_request_handler(ngx_http_request_t *r)
         }
     }
 
-    return ngx_http_read_client_request_body(r, pdin_rdma_send_handler);
+    if (r->pool == NULL)
+        printf("!!! r pool is null \n");
+
+    pdin_rdma_send((void *)r, (void *)pdin_rdma_recv_handler, (void*)r->connection->log, (void*)r->pool);
+    // pdin_rdma_send((void *)r, (void *)pdin_rdma_recv_handler, (void*)r->connection->log, (void*)r->connection->pool);
+
+    r->count++;
+    // return ngx_http_read_client_request_body(r, pdin_rdma_send_handler);
+    return NGX_DONE;
 }
 
 /* PDIN helper to parse worker node addresses from the location conf */
