@@ -796,7 +796,7 @@ free_task:
 }
 
 static doca_error_t
-local_rdma_conn_recv_and_send(struct rdma_resources* resources)
+pdin_rdma_conn_and_alloc_bufs(struct rdma_resources* resources)
 {
     doca_error_t result;
     struct doca_buf *recv_bufs[NUM_BUFS_PER_PDIN_WORKER_PROCESS];
@@ -842,15 +842,6 @@ local_rdma_conn_recv_and_send(struct rdma_resources* resources)
     result = init_inventory(&pdin_send_resources->buf_inventory, inv_num);
     JUMP_ON_DOCA_ERROR(result, error);
     DOCA_LOG_INFO("Worker [%u]'s RDMA client context is running", resources->id);
-
-    DOCA_LOG_INFO("Worker [%u] waits for ACK from the DNE", resources->id);
-
-    /* Wait for ACK from DNE on the worker node */
-    char svr_ack;
-    pdin_rdma_ctrl_path_client_read(rdma_ctrl_path_sockfd, &svr_ack, sizeof(char));
-    if (svr_ack == '1') {
-        DOCA_LOG_INFO("Worker [%ld] received ACK from the DNE", ngx_worker);
-    }
 
     /* Allocate recv buffers and submit recv tasks */
     union doca_data task_user_data;
@@ -919,7 +910,7 @@ client_rdma_state_changed_callback(const union doca_data user_data,
     case DOCA_CTX_STATE_RUNNING:
         DOCA_LOG_INFO("Worker [%u]'s DOCA RDMA client is in RUNNING state", resources->id);
 
-        result = local_rdma_conn_recv_and_send(resources);
+        result = pdin_rdma_conn_and_alloc_bufs(resources);
         LOG_ON_FAILURE(result);
         break;
     case DOCA_CTX_STATE_STOPPING:
