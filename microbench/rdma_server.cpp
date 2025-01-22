@@ -216,8 +216,6 @@ init_send_imm_rdma_resources_without_start(struct rdma_resources *resources,
     //     return result;
     // }
 
-    /* Start RDMA context */
-
     return result;
 
 destroy_resources:

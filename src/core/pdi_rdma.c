@@ -38,7 +38,7 @@ static struct rte_mempool *md_pool;
 #define RETRY_DELAY_US 5000 /* 5 milliseconds */
 #define MAX_RETRIES 2000    /* 10s timeout    */
 
-uint32_t NUM_BUFS_PER_PDIN_WORKER_PROCESS = DEFAULT_RDMA_TASK_NUM;
+uint32_t NUM_BUFS_PER_PDIN_WORKER_PROCESS = DEFAULT_RDMA_TASK_NUM; /* DEFAULT_RDMA_TASK_NUM = 4096 */
 struct doca_buf_pool* pdin_buf_pool;
 int rdma_ctrl_path_sockfd;
 struct rdma_resources *pdin_send_resources;
@@ -723,7 +723,7 @@ pdin_rdma_send(void *ngx_http_request_pt, void *pdin_rdma_handler_pt,
     union doca_data task_user_data;
     task_user_data.ptr = &resources->first_encountered_error;
 
-    result = submit_send_imm_task(resources->rdma, resources->connections[resources->id],
+    result = submit_send_imm_task(resources->rdma, resources->connections[0],
                                   send_buf, 0, task_user_data, &send_task);
     if (result != DOCA_SUCCESS) {
         printf("Worker [%u] failed to submit send_imm task: %s\n",
@@ -1149,7 +1149,6 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
     char *argv[] = {
         "dummy",
         "-d", "mlx5_0",
-        "-n", "1000",
         "-s", "1024",
         "-a", "128.110.219.82",
         "-p", "8080"
@@ -1167,7 +1166,6 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
     DOCA_LOG_INFO("DNE socket IP: %s", cfg->sock_ip);
     DOCA_LOG_INFO("DNE socket port: %d", cfg->sock_port);
     DOCA_LOG_INFO("Message size: %u", cfg->msg_sz);
-    DOCA_LOG_INFO("Number of Messages: %u", cfg->n_msg);
 
     /* Establish control path (TCP) connection with backend DNEs to exchange RC metadata */
     cfg->sock_fd = pdin_rdma_ctrl_path_client_connect(cfg->sock_ip, (uint16_t) cfg->sock_port);
