@@ -101,12 +101,17 @@ ninja -C /tmp/doca_lib
 ```bash
 cd ~/palladium-ingress/
 bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
-
-# NOTE: add "-mssse3" to CFLAGS in objs/Makefile
 # For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
 
 make -j
 sudo make install
+
+# NOTE: Add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile
+objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
+	src/core/pdi_rdma.c
+	$(CC) -c $(CFLAGS) $(CORE_INCS) $(HTTP_INCS) \
+		-o objs/src/core/pdi_rdma.o \
+		src/core/pdi_rdma.c
 ```
 
 ## Enable HTTP-RDMA adaptor in Palladium Ingress
