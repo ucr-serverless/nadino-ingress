@@ -38,6 +38,9 @@ SCALE_DOWN_THRESHOLD = 30  # Percentage
 # Interval for autoscaling-making
 DECISION_INTERVAL = 30  # seconds
 
+# Socket port of RDMA server (microbench)
+RDMA_SERVER_PORT = 9000
+
 top_process = None
 
 # Helper functions
