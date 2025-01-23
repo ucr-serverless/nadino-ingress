@@ -49,6 +49,7 @@
 
 #define MAX_PORT_LEN 6
 #define MAX_EVENTS 64
+#define HPA_SERVER_PORT 9000
 
 DOCA_LOG_REGISTER(RDMA_SERVER::MAIN);
 
@@ -70,6 +71,7 @@ struct {
 std::unordered_map<struct doca_buf*, struct doca_buf*> dpu_buf_to_host_buf;
 std::unordered_map<struct doca_buf*, struct doca_buf*> dst_buf_to_src_buf;
 std::unordered_map<struct doca_buf*, struct doca_rdma_task_receive*> dst_buf_to_recv_task;
+std::vector<struct doca_rdma_connection *> rc_connections;
 
 int
 int_to_port_str(int port, char *ret, size_t len)
@@ -419,6 +421,56 @@ rdma_server_multi_conn_recv_export_and_connect(struct rdma_resources *resources,
     return result;
 }
 
+doca_error_t
+rdma_server_connect(struct rdma_resources *resources, int clt_sk_fd, int clt_id)
+{
+    doca_error_t result = DOCA_SUCCESS;
+
+    resources->remote_rdma_conn_descriptor = malloc(MAX_RDMA_DESCRIPTOR_SZ);
+    if (!resources->remote_rdma_conn_descriptor) {
+        return DOCA_ERROR_NO_MEMORY;
+    }
+
+    DOCA_LOG_INFO("Start to establish RDMA connection with client [%d]", clt_id);
+
+    /* Export RDMA connection details */
+    result = doca_rdma_export(resources->rdma, &(resources->rdma_conn_descriptor),
+                                &(resources->rdma_conn_descriptor_size), &resources->connections[clt_id]);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to export RDMA: %s", doca_error_get_descr(result));
+        return result;
+    }
+    
+    result = sock_recv_buffer(resources->remote_rdma_conn_descriptor,
+                                &resources->remote_rdma_conn_descriptor_size,
+                                MAX_RDMA_DESCRIPTOR_SZ, clt_sk_fd);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to write and read connection details from receiver: %s", doca_error_get_descr(result));
+        return result;
+    }
+
+    result = sock_send_buffer(resources->rdma_conn_descriptor, resources->rdma_conn_descriptor_size, clt_sk_fd);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to send details from sender: %s", doca_error_get_descr(result));
+        return result;
+    }
+
+    /* Connect RDMA RC connection */
+    result = doca_rdma_connect(resources->rdma, resources->remote_rdma_conn_descriptor,
+                                resources->remote_rdma_conn_descriptor_size, resources->connections[clt_id]);
+    if (result != DOCA_SUCCESS)
+        DOCA_LOG_ERR("Failed to connect the sender's RDMA to the receiver's RDMA: %s",
+                        doca_error_get_descr(result));
+
+    DOCA_LOG_INFO("RDMA connection [%d] is establshed", clt_id);
+
+    /* Free remote connection descriptor */
+    free(resources->remote_rdma_conn_descriptor);
+    resources->remote_rdma_conn_descriptor = NULL;
+
+    return result;
+}
+
 static void
 server_rdma_state_changed_callback(const union doca_data user_data,
                                    struct doca_ctx *ctx,
@@ -429,7 +481,6 @@ server_rdma_state_changed_callback(const union doca_data user_data,
     (void)prev_state;
 
     struct rdma_resources *resources = (struct rdma_resources *)user_data.ptr;
-    doca_error_t result;
 
     switch (next_state) {
     case DOCA_CTX_STATE_IDLE:
@@ -443,19 +494,7 @@ server_rdma_state_changed_callback(const union doca_data user_data,
         DOCA_LOG_ERR("RDMA context entered into starting state");
         break;
     case DOCA_CTX_STATE_RUNNING:
-        DOCA_LOG_INFO("RDMA context is in RUNNING state. Establishing RC connections with [%u] clients...", resources->cfg->n_thread);
-
-        /* Establish RC connection (data path) with RDMA clients */
-        result = rdma_server_multi_conn_recv_export_and_connect(resources, resources->connections,
-                                                         resources->cfg->n_thread);
-        if (result != DOCA_SUCCESS) {
-            DOCA_LOG_INFO("Failed to establish RC connection (data path) with RDMA clients");
-        }
-
-        /* Allocate send/recv bufs from DOCA buffer inventory and submit recv tasks */
-        result = rdma_server_alloc_bufs_and_submit_recv_tasks(resources);
-        JUMP_ON_DOCA_ERROR(result, error);
-
+        DOCA_LOG_INFO("RDMA context is in RUNNING state. Establishing RC connections with clients...");
         break;
     case DOCA_CTX_STATE_STOPPING:
         /**
@@ -467,18 +506,98 @@ server_rdma_state_changed_callback(const union doca_data user_data,
     default:
         break;
     }
-    return;
 
-error:
-    DOCA_LOG_INFO("DOCA RDMA context status change error.");
-    doca_ctx_stop(ctx);
-    destroy_inventory(resources->buf_inventory);
-    destroy_rdma_resources(resources, resources->cfg);
+    return;
+}
+
+void *
+run_epoll_thread(void *arg)
+{
+    struct rdma_config *cfg = (struct rdma_config *)arg;
+
+    /* Create server socket for RDMA control path */
+    int rdma_cp_server_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    struct sockaddr_in rdma_cp_server_addr;
+    memset(&rdma_cp_server_addr, 0, sizeof(rdma_cp_server_addr));
+    rdma_cp_server_addr.sin_family = AF_INET;
+    rdma_cp_server_addr.sin_port = htons(cfg->sock_port);
+    rdma_cp_server_addr.sin_addr.s_addr = inet_addr(cfg->sock_ip);
+
+    bind(rdma_cp_server_fd, (struct sockaddr *) &rdma_cp_server_addr, sizeof(struct sockaddr));
+    listen(rdma_cp_server_fd, 4096);
+
+    /* Create server socket for HPA control path */
+    int hpa_svr_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    struct sockaddr_in hpa_server_addr;
+    memset(&hpa_server_addr, 0, sizeof(hpa_server_addr));
+    hpa_server_addr.sin_family = AF_INET;
+    hpa_server_addr.sin_port = htons(HPA_SERVER_PORT);
+    hpa_server_addr.sin_addr.s_addr = inet_addr(cfg->sock_ip);
+
+    bind(hpa_svr_fd, (struct sockaddr *) &hpa_server_addr, sizeof(struct sockaddr));
+    listen(hpa_svr_fd, 4096);
+
+    /* Create epoll */
+    int epoll_fd = epoll_create1(0);
+    struct epoll_event event, events[MAX_EVENTS];
+
+    /* Add server fds to epoll */
+    event.events = EPOLLIN;
+    event.data.fd = rdma_cp_server_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, rdma_cp_server_fd, &event);
+
+    event.events = EPOLLIN;
+    event.data.fd = hpa_svr_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, hpa_svr_fd, &event);
+
+    /* Init. clt_sks_md */
+    for (uint32_t j = 0; j < MAX_NUM_PDIN_WORKERS; j++ ) {
+        clt_sks_md.clt_sk_fds[j] = -1;
+    }
+    clt_sks_md.n_clts_connected = 0;
+
+    DOCA_LOG_INFO("Server starts epoll event loop.");
+    while (1) {
+        int n_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        for (int i = 0; i < n_events; i++) {
+            if (events[i].data.fd == rdma_cp_server_fd) {
+                printf("New events\n");
+                int rdma_cp_clt_fd = accept(rdma_cp_server_fd, NULL, NULL); /* Accept a new connection from RDMA client */
+
+                // rdma_server_connect(resources, rdma_cp_clt_fd, clt_sks_md.n_clts_connected);
+
+                /* Save the client socket fd */
+                clt_sks_md.clt_sk_fds[clt_sks_md.n_clts_connected] = rdma_cp_clt_fd;
+                clt_sks_md.n_clts_connected++;
+
+                // event.events = EPOLLIN;
+                // event.data.fd = rdma_cp_clt_fd;
+                // epoll_ctl(epoll_fd, EPOLL_CTL_ADD, rdma_cp_clt_fd, &event);
+            } else if (events[i].data.fd == hpa_svr_fd) {
+                int hpa_clt_fd = accept(hpa_svr_fd, NULL, NULL); /* Accept a new connection from HPA */
+
+                event.events = EPOLLIN;
+                event.data.fd = hpa_clt_fd;
+                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, hpa_clt_fd, &event);
+            } else {
+                DOCA_LOG_ERR("Unknown fd returned by epoll.");
+            }
+        }
+    }
+
+    close(rdma_cp_server_fd);
+    close(epoll_fd);
 }
 
 doca_error_t
 run_server(void *cfg)
 {
+    // /* Create an epoll thread for establishing control path */
+    // pthread_t epoll_thread;
+    // pthread_create(&epoll_thread, NULL, run_epoll_thread, (void*) &cfg);
+
     doca_error_t result;
     struct rdma_config *config = (struct rdma_config *)cfg;
 
@@ -510,9 +629,9 @@ run_server(void *cfg)
 
     DOCA_LOG_INFO("total_memrange_size: %u", total_memrange_size);
 
-    /* Open DOCA device, configure mmap, mem range, create DOCA RDMA context */
+    /* Open DOCA device, configure mmap, mem range, create DOCA RDMA context, max num connections (2048) */
     result = allocate_rdma_resources(config, mmap_permissions, rdma_permissions, doca_rdma_cap_task_receive_is_supported,
-                                     &resources, total_memrange_size, config->n_thread);
+                                     &resources, total_memrange_size, MAX_NUM_CONNECTIONS);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to allocate RDMA Resources: %s", doca_error_get_descr(result));
     }
@@ -538,62 +657,34 @@ run_server(void *cfg)
         return result;
     }
 
+    /* Establish RC connection (data path) with RDMA clients */
+    result = rdma_server_multi_conn_recv_export_and_connect(&resources, resources.connections,
+                                                        resources.cfg->n_thread);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_INFO("Failed to establish RC connection (data path) with RDMA clients");
+    }
+
+    /* Allocate send/recv bufs from DOCA buffer inventory and submit recv tasks */
+    result = rdma_server_alloc_bufs_and_submit_recv_tasks(&resources);
+    JUMP_ON_DOCA_ERROR(result, error);
+
     DOCA_LOG_INFO("Server joins the event loop.");
     while (resources.run_pe_progress == true) {
         doca_pe_progress(resources.pe);
     }
     DOCA_LOG_INFO("Server left the event loop");
+
+    // pthread_join(epoll_thread, NULL);
+
     return DOCA_SUCCESS;
 
 error:
     DOCA_LOG_INFO("DOCA RDMA context status change error.");
+    doca_ctx_stop(resources.rdma_ctx);
     destroy_inventory(resources.buf_inventory);
     destroy_rdma_resources(&resources, resources.cfg);
 
     return result;
-}
-
-void *
-run_epoll_thread(void *arg)
-{
-    struct sockaddr *server_addr = (struct sockaddr *)arg;
-
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-
-    bind(server_fd, (struct sockaddr *)server_addr, sizeof(struct sockaddr));
-    listen(server_fd, 128);
-
-    int epoll_fd = epoll_create1(0);
-    struct epoll_event event, events[MAX_EVENTS];
-
-    event.events = EPOLLIN;
-    event.data.fd = server_fd;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event);
-
-    /* Init. clt_sks_md */
-    for (uint32_t j = 0; j < MAX_NUM_PDIN_WORKERS; j++ ) {
-        clt_sks_md.clt_sk_fds[j] = -1;
-    }
-    clt_sks_md.n_clts_connected = 0;
-
-    DOCA_LOG_INFO("Server starts epoll event loop.");
-    while (1) {
-        int n_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-        for (int i = 0; i < n_events; i++) {
-            if (events[i].data.fd == server_fd) {
-                int client_fd = accept(server_fd, NULL, NULL); /* Accept a new connection from client */
-
-                /* Save the client socket fd */
-                clt_sks_md.clt_sk_fds[clt_sks_md.n_clts_connected] = client_fd;
-                clt_sks_md.n_clts_connected++;
-            } else {
-                DOCA_LOG_ERR("Server epoll is only for control path connection establishment!");
-            }
-        }
-    }
-
-    close(server_fd);
-    close(epoll_fd);
 }
 
 int
@@ -640,15 +731,8 @@ main(int argc, char **argv)
     }
 
     /* Create an epoll thread for establishing control path */
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    // server_addr.sin_addr.s_addr = INADDR_ANY;
-    inet_pton(AF_INET, cfg.sock_ip, &(server_addr.sin_addr));
-    server_addr.sin_port = htons(cfg.sock_port);
-
     pthread_t epoll_thread;
-    pthread_create(&epoll_thread, NULL, run_epoll_thread, (void*) &server_addr);
+    pthread_create(&epoll_thread, NULL, run_epoll_thread, (void*) &cfg);
 
     run_server(&cfg);
 
