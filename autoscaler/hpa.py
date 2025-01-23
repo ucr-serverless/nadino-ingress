@@ -21,6 +21,7 @@ import subprocess
 import time
 import re
 import signal
+import socket
 
 # Configuration
 NGINX_CONF_PATH = "/usr/local/nginx_fstack/conf/nginx.conf"
@@ -31,17 +32,82 @@ NGINX_RELOAD_CMD = "sudo /usr/local/nginx_fstack/sbin/nginx -s reload"
 
 EWMA_ALPHA = 0.2  # Weight for EWMA
 
-MAX_WORKERS = 20
-SCALE_UP_THRESHOLD = 80  # Percentage
+MAX_WORKERS = 20           # Maximum PDIN workers
+SCALE_UP_THRESHOLD = 80    # Percentage
 SCALE_DOWN_THRESHOLD = 30  # Percentage
 
 # Interval for autoscaling-making
 DECISION_INTERVAL = 30  # seconds
 
-# Socket port of RDMA server (microbench)
-RDMA_SERVER_PORT = 9000
+# Address of DNE (RDMA server in microbench)
+DNE_SERVER_PORT = 9000            # Socket port of DNE
+DNE_SERVER_IP = "128.110.219.177" # IP of DNE
+DNE_RETRY_INTERVAL = 0.5          # Socket port of DNE
+
+# HPA/DNE OP codes
+DNE_ACK_READY = 200 # DNE notifies HPA that PDIN is ready
+HPA_SND_TERM  = 300 # HPA notifies DNE to disconnect RC connections with PDIN
+DNE_ACK_TERM  = 400 # DNE notifies HPA that PDIN can be reloaded
 
 top_process = None
+
+class HPA_Channel:
+    def __init__(self, host, port):
+        """
+        Initialize the channel to DNE.
+
+        :param host: DNE IP
+        :param port: DNE Port
+        """
+        self.host = host
+        self.port = port
+        self.client_socket = None
+
+    def connect_to_dne(self):
+        """Connect to DNE and wait for ACK."""
+        while True:
+            try:
+                self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.client_socket.connect((self.host, self.port))
+                print(f"Successfully connected to DNE {self.host}:{self.port}")
+
+                break
+            except socket.error as e:
+                print(f"Error connecting to DNE: {e}. Retrying in {DNE_RETRY_INTERVAL} second(s)...")
+                time.sleep(DNE_RETRY_INTERVAL)
+                self.client_socket = None
+
+    def wait_for_ack(self):
+        """Wait for DNE to send an ACK."""
+        if not self.client_socket:
+            print("Not yet connected to DNE, unable to receive ACK")
+            return None
+        try:
+            ack = self.client_socket.recv(1024)
+            if len(ack) < 4:
+                raise ValueError("Incomplete ACK received")
+            ack_code = int.from_bytes(ack, byteorder='little')
+            print(f"Received ACK from DNE: {ack_code}")
+            return ack_code
+        except socket.error as e:
+            print(f"Error receiving ACK: {e}")
+            return None
+
+    def send_terminate_signal(self, signal: int):
+        """Sends a termination signal to the DNE."""
+        try:
+            if self.client_socket:
+                self.client_socket.sendall(signal.to_bytes(4, byteorder='big'))
+                print("The DNE has been sent a terminate signal (TERMINATE).")
+        except Exception as e:
+            print(f"Failed to send the termination signal: {e}")
+
+    def close_connection(self):
+        """Close the connection."""
+        if self.client_socket:
+            self.client_socket.close()
+            self.client_socket = None
+            print("The client connection has been closed.")
 
 # Helper functions
 def start_top():
@@ -171,6 +237,8 @@ def horizontal_scaling(cpu_ewma):
     # Step 4: Reload NGINX
     stop_top()
 
+    """TODO: Signal DNE to disconnect and wait for ACK."""
+
     reload_nginx()
     print(f"Reloaded NGINX with {new_workers} worker processes.")
 
@@ -182,6 +250,15 @@ def horizontal_scaling(cpu_ewma):
 
 def main():
     global top_process
+
+    # Connect with DNE
+    hpa_clt = HPA_Channel(host = DNE_SERVER_IP, port = DNE_SERVER_PORT)
+    hpa_clt.connect_to_dne()
+
+    # Wait for the ACK returned by DNE to validate PDIN status
+    ack_code = hpa_clt.wait_for_ack()
+    if ack_code == DNE_ACK_READY:
+        print("PDIN startup was confirmed by DNE.")
 
     cpu_ewma = 0.0
     start_top()
