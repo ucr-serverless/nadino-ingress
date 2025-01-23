@@ -31,10 +31,10 @@ There are several configurable parameters in `hpa.py`:
 - `SCALE_UP_THRESHOLD` and `SCALE_DOWN_THRESHOLD`: Scaling thresholds
 - `DECISION_INTERVAL`: Interval for autoscaling-making
 
-## Run Ingress HPA
+## Run Ingress HPA (with `sudo` privilege)
 ```bash
 cd ~/palladium-ingress/autoscaler
-python hpa.py
+sudo python hpa.py
 ```
 
 ## Load generator (wrk)

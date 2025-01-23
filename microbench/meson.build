@@ -53,7 +53,6 @@ add_project_arguments(['-std=c++20'], language: 'cpp')
 
 # Check for deps
 libconfig_dep = dependency('libconfig', required: true)
-dpdk_dep = dependency('libdpdk', required: true)
 glib_dep = dependency('glib-2.0', required: true)
 ibverbs_dep = dependency('libibverbs', required: true)
 
@@ -111,7 +110,7 @@ if doca_found
       include_directories: inc_dirs,
       cpp_args: cflags + doca_cflags,
       link_args: ldflags + ldlibs,
-      dependencies: [libconfig_dep, dpdk_dep, glib_dep, ibverbs_dep, doca_dep, build_doca_dep, doca_common, doca_rdma_dep, doca_argp_dep, doca_comch_dep, doca_dma_dep],
+      dependencies: [libconfig_dep, glib_dep, ibverbs_dep, doca_dep, build_doca_dep, doca_common, doca_rdma_dep, doca_argp_dep, doca_comch_dep, doca_dma_dep],
       install: false
     )
   endforeach
