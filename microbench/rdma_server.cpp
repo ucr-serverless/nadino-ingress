@@ -335,6 +335,7 @@ destroy_src_buf:
     return result;
 }
 
+/* TODO: Drain submitted tasks before disconnecting */
 doca_error_t
 dne_disconnect_pdin_workers(struct rdma_resources *resources)
 {
@@ -350,7 +351,9 @@ dne_disconnect_pdin_workers(struct rdma_resources *resources)
         if (close(pdin_clt_sks_md.clt_sk_fds[i]) == -1) {
             DOCA_LOG_ERR("Error in close(): %s", strerror(errno));
         }
+        // pdin_clt_sks_md.clt_sk_fds[i] = -1;
     }
+    // pdin_clt_sks_md.n_clts_connected = 0;
 
     /* Disconnect RDMA connections */
     for (i = 0; i < resources->num_connection_established; i++) {
@@ -361,7 +364,9 @@ dne_disconnect_pdin_workers(struct rdma_resources *resources)
         } else {
             DOCA_LOG_INFO("DNE successfully disconnected RC connection [%u]", i);
         }
+        // resources->connections[i] = NULL;
     }
+    // resources->num_connection_established = 0;
 
     return result;
 }
@@ -592,6 +597,8 @@ run_epoll_thread(void *args)
                     DOCA_LOG_INFO("DNE received unexpected code [%d] from HPA (expected code: [%d]).", code, (int) HPA_SND_TERM);
                     continue;
                 }
+
+                /* TODO: Drain in-flight tasks before disconnecting */
 
                 /* Disconnect RDMA connections with PDIN and send ACK to HPA */
                 result = dne_disconnect_pdin_workers(resources);

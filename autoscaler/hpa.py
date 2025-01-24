@@ -97,7 +97,7 @@ class HPA_Channel:
         """Sends a termination signal to the DNE."""
         try:
             if self.client_socket:
-                self.client_socket.sendall(signal.to_bytes(4, byteorder='big'))
+                self.client_socket.sendall(signal.to_bytes(4, byteorder='little'))
                 print("The DNE has been sent a terminate signal (TERMINATE).")
         except Exception as e:
             print(f"Failed to send the termination signal: {e}")
@@ -211,7 +211,7 @@ def parse_top_output(line):
         print(f"Unexpected top output: {line}. Restart top...")
         return None
 
-def horizontal_scaling(cpu_ewma):
+def horizontal_scaling(cpu_ewma, hpa_clt):
     """Scale worker processes based on CPU EWMA."""
 
     # Step 1: Read the current number of worker_processes
@@ -237,7 +237,15 @@ def horizontal_scaling(cpu_ewma):
     # Step 4: Reload NGINX
     stop_top()
 
-    """TODO: Signal DNE to disconnect and wait for ACK."""
+    """Signal DNE to disconnect and wait for ACK."""
+    # hpa_clt.send_terminate_signal(int(HPA_SND_TERM))
+
+    # # Wait for DNE_ACK_TERM from DNE
+    # ack_code = hpa_clt.wait_for_ack()
+    # if ack_code == DNE_ACK_TERM:
+    #     print("DNE already disconnected PDIN.")
+    # else:
+    #     raise ValueError(f"DNE returns unexpected code {ack_code}")
 
     reload_nginx()
     print(f"Reloaded NGINX with {new_workers} worker processes.")
@@ -286,7 +294,7 @@ def main():
 
                 # Check if it's time to make a scaling decision
                 if time.time() - last_decision_time > DECISION_INTERVAL:
-                    horizontal_scaling(cpu_ewma)
+                    horizontal_scaling(cpu_ewma, hpa_clt)
                     last_decision_time = time.time()
             else:
                 print("Line is None")
