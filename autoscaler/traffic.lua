@@ -52,7 +52,7 @@ function request()
         last_time = now
     end
 
-    local path = "/"
+    local path = "/rdma"
     return wrk.format("GET", path)
 end
 

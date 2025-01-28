@@ -55,13 +55,13 @@ echo "Let all wrk instances run simultaneously for 30 seconds"
 sleep 30
 
 # reduce to 5 wrk instances
-for ((j=10; j>5; j--)); do
-    adjust_instances $((j-1))
-    sleep $interval
-done
+# for ((j=10; j>5; j--)); do
+#     adjust_instances $((j-1))
+#     sleep $interval
+# done
 
 # increase to 15 wrk instances
-for ((j=5; j<=15; j++)); do
+for ((j=10; j<=15; j++)); do
     adjust_instances $j
     sleep $interval
 done
