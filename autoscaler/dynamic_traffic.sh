@@ -2,7 +2,7 @@
 
 cluster_ip=$1 # URL
 wrk_script="traffic.lua"                            # lua script
-duration="420s"                                     # Running duration per wrk instance
+duration="4200s"                                    # Running duration per wrk instance
 initial_instances=1                                 # One wrk instance at the beginning
 interval=10                                         # Time interval (in seconds) between each instance increase/decrease
 
