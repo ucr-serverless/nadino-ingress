@@ -616,6 +616,10 @@ pdin_doca_mempool_get(struct doca_buf_pool* buf_pool, size_t buf_set_data_len)
     }
 
     // print_doca_buf_len(buf);
+    // size_t total_len;
+    // doca_buf_get_len(buf, &total_len);
+
+    // printf("doca_buf_get_len: %lu\n", total_len);
 
     return buf;
 }
@@ -909,13 +913,16 @@ pdin_rdma_conn_and_alloc_bufs(struct rdma_resources* resources)
         DOCA_LOG_INFO("Worker [%u] failed to export RDMA: %s", resources->id, doca_error_get_descr(result));
     }
 
+print_buffer_hex((resources->rdma_conn_descriptor), resources->rdma_conn_descriptor_size);
+
+printf("%d\n", __LINE__);
     /* Send RDMA connection details to the DNE */
     /* result = write_read_connection(resources->cfg, resources, i); */
     result = sock_send_buffer(resources->rdma_conn_descriptor, resources->rdma_conn_descriptor_size, rdma_ctrl_path_sockfd);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_INFO("Worker [%u] failed to send details from sender: %s", resources->id, doca_error_get_descr(result));
     }
-
+printf("%d\n", __LINE__);
     /* Wait for RDMA connection details from the DNE */
     result = sock_recv_buffer(resources->remote_rdma_conn_descriptor,
                                 &resources->remote_rdma_conn_descriptor_size,
@@ -925,6 +932,9 @@ pdin_rdma_conn_and_alloc_bufs(struct rdma_resources* resources)
     }
     DOCA_LOG_INFO("exchanged RDMA info on [%u]", resources->id);
 
+print_buffer_hex((resources->remote_rdma_conn_descriptor), resources->remote_rdma_conn_descriptor_size);
+
+printf("%d\n", __LINE__);
     /* Establish RC connection with the DNE */
     result = doca_rdma_connect(resources->rdma, resources->remote_rdma_conn_descriptor,
                                resources->remote_rdma_conn_descriptor_size, resources->connections[0]);
@@ -933,7 +943,7 @@ pdin_rdma_conn_and_alloc_bufs(struct rdma_resources* resources)
                     resources->id, doca_error_get_descr(result));
         (void)doca_ctx_stop(doca_rdma_as_ctx(resources->rdma));
     }
-
+printf("%d\n", __LINE__);
     uint64_t inv_num = 2 * (uint64_t) NUM_BUFS_PER_PDIN_WORKER_PROCESS;    
     // DOCA_LOG_INFO("Worker [%u] allocates [%lu] DOCA bufs", resources->id, inv_num);
     result = init_inventory(&resources->buf_inventory, inv_num);
@@ -1249,10 +1259,12 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
     char *argv[] = {
         "dummy",
         "-d", "mlx5_0",
+        //"-s", "1024",
         "-s", "167088",
-        "-a", "128.110.219.177",
-        "-p", "10000",
-	    // "-g", "3"
+        "-a", "192.168.10.42",
+        // "-a", "192.168.10.63",
+        "-p", "8084",
+        "-g", "3"
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
 
