@@ -52,7 +52,7 @@ for ((j=$initial_instances; j<=10; j++)); do
 done
 
 echo "Let all wrk instances run simultaneously for 30 seconds"
-sleep 30
+# sleep 30
 
 # reduce to 5 wrk instances
 # for ((j=10; j>5; j--)); do

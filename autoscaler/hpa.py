@@ -41,7 +41,7 @@ DECISION_INTERVAL = 30  # seconds
 
 # Address of DNE (RDMA server in microbench)
 DNE_SERVER_PORT = 9000            # Socket port of DNE
-DNE_SERVER_IP = "128.110.219.186" # IP of DNE
+DNE_SERVER_IP = "128.110.219.177" # IP of DNE
 DNE_RETRY_INTERVAL = 0.5          # Socket port of DNE
 
 # HPA/DNE OP codes
