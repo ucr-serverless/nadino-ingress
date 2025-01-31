@@ -47,16 +47,16 @@ void pdin_test_ngx_worker_tx(void);
 void pdin_test_ngx_worker_rx(void);
 void pdin_test_rdma_worker_bounce(ngx_cycle_t *cycle);
 
-struct pdin_rdma_md_s {
-    /* pointer to received HTTP request */
-    void *ngx_http_request_pt;
-    /* pointer to callback handler */
-    void *pdin_rdma_handler_pt;
-    /* pointer to handler log */
-    void *pdin_rdma_handler_log_pt;
-    /* pointer to request mempool */
-    void *ngx_http_request_mempool_pt;
-} __attribute__((packed)) __rte_cache_aligned;
+// struct pdin_rdma_md_s {
+//     /* pointer to received HTTP request */
+//     void *ngx_http_request_pt;
+//     /* pointer to callback handler */
+//     void *pdin_rdma_handler_pt;
+//     /* pointer to handler log */
+//     void *pdin_rdma_handler_log_pt;
+//     /* pointer to request mempool */
+//     void *ngx_http_request_mempool_pt;
+// } __attribute__((packed)) __rte_cache_aligned;
 
 struct pdin_rdma_md_s *pdin_rdma_md_alloc(void);
 void pdin_rdma_md_free(struct pdin_rdma_md_s *md);

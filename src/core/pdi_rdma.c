@@ -31,6 +31,7 @@
 #include <doca_buf_pool.h>
 
 #include <ngx_http.h>
+#include "pdi_http.h"
 
 DOCA_LOG_REGISTER(WORKER::PDI_RDMA);
 struct doca_log_backend *sdk_log;
@@ -699,16 +700,93 @@ pdin_rdma_recv_handler(ngx_http_request_t *r)
 }
 
 static void
-pdin_rdma_post_http_response(struct pdin_rdma_md_s *md)
+pdin_rdma_post_http_response(struct http_transaction *ht)
 {
-    void *r = md->ngx_http_request_pt;
-    // void *handler = md->pdin_rdma_handler_pt;
-    // void *log = md->pdin_rdma_handler_log_pt;
-    // void *pool = md->ngx_http_request_mempool_pt;
+    void *r = ht->pdin_md.ngx_http_request_pt;
+    // void *handler = ht->pdin_md.pdin_rdma_handler_pt;
+    // void *log = ht->pdin_md.pdin_rdma_handler_log_pt;
+    // void *pool = ht->pdin_md.ngx_http_request_mempool_pt;
 
     pdin_rdma_recv_handler((ngx_http_request_t *)r);
 
     return;
+}
+
+static void
+pdin_parse_ob_route_id(struct http_transaction *txn)
+{
+    // printf("%s\n", txn->request);
+    const char *string = strstr(txn->request, "/");
+
+    if (string == NULL) {
+        txn->route_id = 0;
+    } else {
+        // Skip consecutive slashes in one step
+        string += strspn(string, "/");
+
+        errno = 0;
+        txn->route_id = strtol(string, NULL, 10);
+        if (errno != 0) {
+            txn->route_id = 0;
+        }
+    }
+
+    // DOCA_LOG_INFO("Route ID: %d", txn->route_id);
+}
+
+void pdin_trim_header(char *request) {
+    const char *target = "/rdma";
+    char *pos = strstr(request, target);  // Find "/rdma"
+
+    if (pos) {
+        size_t len = strlen(target);
+        memmove(pos, pos + len, strlen(pos + len) + 1); // Shift left
+    }
+}
+
+static ngx_int_t
+pdin_copy_http_request(ngx_http_request_t *r, struct http_transaction* txn)
+{
+    size_t offset = 0;
+
+    char* request = txn->request;
+
+    // Copy request line
+    offset += ngx_snprintf((u_char *) request + offset, HTTP_MSG_LENGTH_MAX - offset,
+                           "%V %V %V\r\n",
+                           &r->method_name, &r->unparsed_uri, &r->http_protocol)
+              - (u_char *) request;
+
+    // Copy headers
+    ngx_list_part_t *part = &r->headers_in.headers.part;
+    ngx_table_elt_t *header = part->elts;
+    for (ngx_uint_t i = 0; i < part->nelts; i++) {
+        if (offset < HTTP_MSG_LENGTH_HEADER_MAX) {
+            offset += ngx_snprintf((u_char *) request + offset, HTTP_MSG_LENGTH_HEADER_MAX - offset,
+                                   "%V: %V\r\n", &header[i].key, &header[i].value)
+                      - (u_char *) request;
+        }
+    }
+
+    // Append blank line after headers
+    if (offset < HTTP_MSG_LENGTH_HEADER_MAX) {
+        request[offset++] = '\r';
+        request[offset++] = '\n';
+    }
+
+    // Copy body if present
+    if (r->request_body && r->request_body->bufs) {
+        ngx_chain_t *cl = r->request_body->bufs;
+        while (cl && offset < HTTP_MSG_LENGTH_MAX) {
+            ngx_buf_t *b = cl->buf;
+            size_t len = ngx_min((size_t)(b->last - b->pos), HTTP_MSG_LENGTH_MAX - offset);
+            ngx_memcpy(request + offset, b->pos, len);
+            offset += len;
+            cl = cl->next;
+        }
+    }
+
+    return NGX_OK;
 }
 
 void
@@ -717,7 +795,7 @@ pdin_rdma_send(void *ngx_http_request_pt, void *pdin_rdma_handler_pt,
 {
     doca_error_t result;
     struct doca_rdma_task_send_imm *send_task;
-    struct pdin_rdma_md_s *md;
+    struct http_transaction *ht;
     struct rdma_resources *resources = (struct rdma_resources *) ngx_cycle->rdma_resources;
 
     struct doca_buf *send_buf = pdin_doca_mempool_get(pdin_buf_pool, (size_t) resources->cfg->msg_sz);
@@ -725,18 +803,22 @@ pdin_rdma_send(void *ngx_http_request_pt, void *pdin_rdma_handler_pt,
     // DOCA_LOG_INFO("The reference count of the send_buf: %u", pdin_dec_buf_refcount(send_buf));
 
     /* Allocate and construct RDMA send task */
-    result = doca_buf_get_data(send_buf, (void **) &md);
+    result = doca_buf_get_data(send_buf, (void **) &ht);
     if (result != DOCA_SUCCESS) {
         printf("Worker [%u] failed to get buf data: %s\n",
                         resources->id, doca_error_get_descr(result));
     }
 
-    md->ngx_http_request_pt = ngx_http_request_pt; /* pointer to received HTTP request */
-    md->pdin_rdma_handler_pt = pdin_rdma_handler_pt; /* pointer to callback handler */
-    md->pdin_rdma_handler_log_pt = pdin_rdma_handler_log_pt; /* pointer to handler log */
-    md->ngx_http_request_mempool_pt = ngx_http_request_mempool_pt; /* pointer to request mempool */
+    ht->pdin_md.ngx_http_request_pt = ngx_http_request_pt; /* pointer to received HTTP request */
+    ht->pdin_md.pdin_rdma_handler_pt = pdin_rdma_handler_pt; /* pointer to callback handler */
+    ht->pdin_md.pdin_rdma_handler_log_pt = pdin_rdma_handler_log_pt; /* pointer to handler log */
+    ht->pdin_md.ngx_http_request_mempool_pt = ngx_http_request_mempool_pt; /* pointer to request mempool */
     // DOCA_LOG_INFO("Sent PDIN RDMA header: [r:%p] [handler:%p] [rlog:%p] [mp:%p]",
     //         ngx_http_request_pt, pdin_rdma_handler_pt, pdin_rdma_handler_log_pt, ngx_http_request_mempool_pt);
+
+    pdin_copy_http_request((ngx_http_request_t *)ngx_http_request_pt, ht);
+    pdin_trim_header(ht->request);
+    pdin_parse_ob_route_id(ht);
 
     union doca_data task_user_data;
     task_user_data.ptr = &resources->first_encountered_error;
@@ -774,7 +856,7 @@ client_rdma_recv_callback(struct doca_rdma_task_receive *recv_task,
     struct doca_buf *recv_buf = doca_rdma_task_receive_get_dst_buf(recv_task);
 
     /* Parse PDIN RDMA header */
-    struct pdin_rdma_md_s *recv_data;
+    struct http_transaction *recv_data;
     result = doca_buf_get_data(recv_buf, (void **) &recv_data);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_INFO("Worker [%u] failed to get buf data: %s",
@@ -1167,9 +1249,10 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
     char *argv[] = {
         "dummy",
         "-d", "mlx5_0",
-        "-s", "1024",
+        "-s", "167088",
         "-a", "128.110.219.177",
-        "-p", "10000"
+        "-p", "10000",
+	    // "-g", "3"
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
 
