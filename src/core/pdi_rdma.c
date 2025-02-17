@@ -843,12 +843,9 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
     char *argv[] = {
         "dummy",
         "-d", "mlx5_0",
-        //"-s", "1024",
         "-s", "167088",
-        "-a", "192.168.10.42",
-        // "-a", "192.168.10.63",
-        "-p", "8084",
-        "-g", "3"
+        "-a", "128.110.219.40",
+        "-p", "10000"
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
 

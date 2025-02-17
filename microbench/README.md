@@ -19,7 +19,9 @@ There are several configurable parameters for `rdma_server`:
 - `-p`: `rdma_server` node port
 
 ```bash
-/tmp/rdma_server/rdma_server -d mlx5_0 -n 1000 -s 1024 -a 128.110.219.82 -p 10000
+/tmp/rdma_server/rdma_server -d mlx5_0 -s 1024 -a 128.110.219.82 -p 10000
+
+# sizeof(struct http_transaction) == 167088
 ```
 
 # Note

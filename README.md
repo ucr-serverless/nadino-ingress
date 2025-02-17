@@ -1,15 +1,15 @@
 # Palladium Ingress
 
 ## Testbed
-Existing build has been tested on c220g* nodes on Cloudlab Wisc, using 
-Ubuntu 22.04 with kernel 5.15.
-Note: F-stack works with Intel NICs using `igb_uio` driver.
+Existing build has been tested on Ubuntu 22.04 with kernel 5.15. 
+
+Note: F-stack works with Intel NICs using `igb_uio` driver and Mellanox NICs using `mlx5_core` driver.
 
 ```bash
 git clone --recursive https://github.com/ucr-serverless/palladium-ingress.git
 ```
 
-## Build F-stack
+## Install deps
 ```bash
 # Install byobu (optional)
 sudo apt update && sudo apt install -y byobu && byobu
@@ -34,6 +34,16 @@ sudo apt update && sudo apt install -y flex bison build-essential dwarves libssl
 pip3 install meson ninja
 pip3 install pyelftools --upgrade
 
+# To get F-stack to work with Mellanox NICs, install the `mlx5_core` driver.
+# Skip this step if you get F-stack to work with Intel NICs
+cd palladium-ingress/RDMA_lib/scripts/
+bash install_ofed_driver.sh
+sudo /etc/init.d/openibd restart # load the newly installed drivers
+sudo reboot # Reboot node to load IP address
+```
+
+## Build DPDK and F-stack
+```bash
 # Compile DPDK (21.11)
 cd palladium-ingress/f-stack/dpdk/
 meson setup -Denable_kmods=true build
@@ -63,7 +73,7 @@ modprobe uio
 insmod f-stack/dpdk/build/kernel/linux/igb_uio/igb_uio.ko
 insmod f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on # carrier=on is necessary, otherwise need to be up `veth0` via `echo 1 > /sys/class/net/veth0/carrier`
 
-# Bind NICs to DPDK
+# Bind NICs to DPDK (only for Intel NICs)
 python dpdk-devbind.py --status
 ifconfig eth0 down
 python dpdk-devbind.py --bind=igb_uio eth0 # assuming that use 10GE NIC and eth0
@@ -97,21 +107,43 @@ cd ~/palladium-ingress/DOCA_lib
 meson /tmp/doca_lib
 ninja -C /tmp/doca_lib
 ```
+
 ## Build Palladium Ingress (NGINX)
 ```bash
 cd ~/palladium-ingress/
 bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 # For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
 
-make -j
-sudo make install
-
-# NOTE: Add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile
+# NOTE 1: Add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile
 objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
 	src/core/pdi_rdma.c
 	$(CC) -c $(CFLAGS) $(CORE_INCS) $(HTTP_INCS) \
 		-o objs/src/core/pdi_rdma.o \
 		src/core/pdi_rdma.c
+
+# NOTE 2: Update hardcoded RDMA params in pdi_rdma.c
+# Go to pdin_init_rdma_config() in pdi_rdma.c
+    char *argv[] = {
+        "dummy",
+        "-d", "mlx5_0",
+        "-s", "167088",
+        "-a", "128.110.219.40",
+        "-p", "10000"
+    };
+
+# If need "-g"
+    char *argv[] = {
+        "dummy",
+        "-d", "mlx5_0",
+        "-s", "167088",
+        "-a", "128.110.219.40",
+        "-p", "10000",
+        "-g", "3"
+    };
+
+# Compile Palladium Ingress
+make -j
+sudo make install
 ```
 
 ## Enable HTTP-RDMA adaptor in Palladium Ingress
@@ -144,6 +176,11 @@ http {
 # Run NGINX not as a daemon
 sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
 
+# Number of worker processes: 
+# Default config creates only one worker process
+# If you need more worker processes, please change both "lcore_mask" in f-stack.conf and "worker_processes" in nginx.conf
+# or use HPA to adjust number of worker processes based on load level
+
 # Print logs of NGINX
 sudo cat /var/log/syslog | grep "f-stack"
 
@@ -153,7 +190,41 @@ tail -f /usr/local/nginx_fstack/logs/error.log
 # Modify F-stack configuration
 sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
 
-# Important Note:
+# Bind NIC to F-stack
+# You need to properly change "port_list" and "Port config section" in f-stack.conf to bind NIC to F-stack.
+# The first is to get the index of port used for F-stack. I will use Cloudlab node as an example to explain.
+# You will need to use "palladium-ingress/f-stack/dpdk/usertools/dpdk-devbind.py" to get the port index
+cd ~/palladium-ingress/f-stack/dpdk/usertools/
+python dpdk-devbind.py --status
+# You will see the output as below:
+Network devices using kernel driver
+===================================
+0000:01:00.0 'MT27800 Family [ConnectX-5] 1017' if=eno33np0 drv=mlx5_core unused=vfio-pci *Active*
+0000:01:00.1 'MT27800 Family [ConnectX-5] 1017' if=eno34np1 drv=mlx5_core unused=vfio-pci
+0000:41:00.0 'MT27800 Family [ConnectX-5] 1017' if=enp65s0f0np0 drv=mlx5_core unused=vfio-pci *Active*
+0000:41:00.1 'MT27800 Family [ConnectX-5] 1017' if=enp65s0f1np1 drv=mlx5_core unused=vfio-pci
+
+# The port index follows the order in the output, starting from 0
+# If I want to bind eno33np0 to F-stack, the port index will be used in f-stack.conf is 0
+# If I want to bind enp65s0f0np0 to F-stack, the port index will be used in f-stack.conf is 2
+
+# Next is to update "port_list" and "Port config section" in f-stack.conf
+# If I choose enp65s0f0np0 (the port index is 2), I need to specify port_list=2 in Line#59 in f-stack.conf
+# I also need to change the port config section as below, replace the default [port0] with [port2],
+# and update "addr", "broadcast", "gateway" accordingly
+    ...
+    port_list=2
+    ...
+    # Port config section
+    # Correspond to dpdk.port_list's index: port0, port1...
+    [port2]
+    addr=10.10.1.1
+    netmask=255.255.255.0
+    broadcast=10.10.1.255
+    gateway=10.10.1.1
+    ...
+
+# Important Note of f-stack.conf:
 # F-stack has 100us TX packet delay time (pkt_tx_delay) while send less than 32 pkts.
 # This affects RPS and latency performance at low concurrency.
 ```

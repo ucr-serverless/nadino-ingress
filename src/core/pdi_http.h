@@ -262,21 +262,19 @@ typedef struct _adresponse
 } AdResponse;
 
 struct pdin_rdma_md_s {
-    //  pointer to received HTTP request /
+    /* pointer to received HTTP request */
     void *ngx_http_request_pt;
-     // pointer to callback handler /
+    /* pointer to callback handler */
     void *pdin_rdma_handler_pt;
-     // pointer to handler log /
+    /* pointer to handler log */
     void *pdin_rdma_handler_log_pt;
-     // pointer to request mempool /
+    /* pointer to request mempool */
     void *ngx_http_request_mempool_pt;
-}; 
+}; // __attribute__((packed)) __rte_cache_aligned;
 
 enum req_tp_t {
     AD = 0,
 };
-
-
 
 struct AdBody {
     AdRequest ad_request;
