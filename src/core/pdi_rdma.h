@@ -24,17 +24,6 @@
 
 #include "rdma_common_doca.h"
 
-// struct pdin_rdma_md_s {
-//     /* pointer to received HTTP request */
-//     void *ngx_http_request_pt;
-//     /* pointer to callback handler */
-//     void *pdin_rdma_handler_pt;
-//     /* pointer to handler log */
-//     void *pdin_rdma_handler_log_pt;
-//     /* pointer to request mempool */
-//     void *ngx_http_request_mempool_pt;
-// } __attribute__((packed)) __rte_cache_aligned;
-
 /* DOCA RDMA helpers */
 void pdin_init_doca_rdma_client_ctx(ngx_int_t proc_id, void *cfg, ngx_cycle_t *cycle);
 void pdin_destroy_doca_rdma_client_ctx(struct rdma_config *config, struct rdma_resources *resources);
