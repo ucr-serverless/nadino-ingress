@@ -1,4 +1,4 @@
-# Palladium Ingress
+# NADINO's Cluster Ingress
 
 ## Testbed
 Existing build has been tested on Ubuntu 22.04 with kernel 5.15. 
@@ -6,7 +6,7 @@ Existing build has been tested on Ubuntu 22.04 with kernel 5.15.
 Note: F-stack works with Intel NICs using `igb_uio` driver and Mellanox NICs using `mlx5_core` driver.
 
 ```bash
-git clone --recursive https://github.com/ucr-serverless/palladium-ingress.git
+git clone --recursive https://github.com/ucr-serverless/nadino-ingress.git
 ```
 
 ## Install deps
@@ -36,7 +36,7 @@ pip3 install pyelftools --upgrade
 
 # To get F-stack to work with Mellanox NICs, install the `mlx5_core` driver.
 # Skip this step if you get F-stack to work with Intel NICs
-cd palladium-ingress/RDMA_lib/scripts/
+cd nadino-ingress/RDMA_lib/scripts/
 bash install_ofed_driver.sh
 sudo /etc/init.d/openibd restart # load the newly installed drivers
 sudo reboot # Reboot node to load IP address
@@ -45,7 +45,7 @@ sudo reboot # Reboot node to load IP address
 ## Build DPDK and F-stack
 ```bash
 # Compile DPDK (21.11)
-cd palladium-ingress/f-stack/dpdk/
+cd nadino-ingress/f-stack/dpdk/
 meson setup -Denable_kmods=true build
 ninja -C build
 ninja -C build install
@@ -79,16 +79,16 @@ ifconfig eth0 down
 python dpdk-devbind.py --bind=igb_uio eth0 # assuming that use 10GE NIC and eth0
 
 # Compile and install F-Stack
-export FF_PATH=~/palladium-ingress/f-stack
+export FF_PATH=~/nadino-ingress/f-stack
 export PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig
-cd ~/palladium-ingress/f-stack/lib/
+cd ~/nadino-ingress/f-stack/lib/
 make -j
 sudo make install
 ```
 
 ## Build RDMA Lib
 ```bash
-cd ~/palladium-ingress/RDMA_lib
+cd ~/nadino-ingress/RDMA_lib
 make
 ```
 
@@ -103,14 +103,14 @@ sudo apt-get update
 sudo apt-get -y install doca-all
 
 # Install DOCA Lib
-cd ~/palladium-ingress/DOCA_lib
+cd ~/nadino-ingress/DOCA_lib
 meson /tmp/doca_lib
 ninja -C /tmp/doca_lib
 ```
 
-## Build Palladium Ingress (NGINX)
+## Build NADINO Ingress
 ```bash
-cd ~/palladium-ingress/
+cd ~/nadino-ingress/
 bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 # For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
 
@@ -141,12 +141,12 @@ objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
         "-g", "3"
     };
 
-# Compile Palladium Ingress
+# Compile NADINO Ingress
 make -j
 sudo make install
 ```
 
-## Enable HTTP-RDMA adaptor in Palladium Ingress
+## Enable HTTP-RDMA adaptor in NADINO Ingress
 We use the NGINX location block to enable HTTP-RDMA adaptor. The command used for HTTP-RDMA adaptor is `palladium_ingress`. The command used for the regular HTTP reverse proxy is still `proxy_pass`. An example configuration of HTTP-RDMA adaptor is shown below:
 ```
 http {
@@ -171,7 +171,7 @@ http {
 }
 ```
 
-## Test Palladium Ingress
+## Test NADINO Ingress
 ```bash
 # Run NGINX not as a daemon
 sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
@@ -193,8 +193,8 @@ sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
 # Bind NIC to F-stack
 # You need to properly change "port_list" and "Port config section" in f-stack.conf to bind NIC to F-stack.
 # The first is to get the index of port used for F-stack. I will use Cloudlab node as an example to explain.
-# You will need to use "palladium-ingress/f-stack/dpdk/usertools/dpdk-devbind.py" to get the port index
-cd ~/palladium-ingress/f-stack/dpdk/usertools/
+# You will need to use "nadino-ingress/f-stack/dpdk/usertools/dpdk-devbind.py" to get the port index
+cd ~/nadino-ingress/f-stack/dpdk/usertools/
 python dpdk-devbind.py --status
 # You will see the output as below:
 Network devices using kernel driver
