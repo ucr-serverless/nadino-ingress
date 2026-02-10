@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/un.h>
@@ -506,7 +507,8 @@ printf("%d\n", __LINE__);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_INFO("Worker [%u] failed to send details from sender: %s", resources->id, doca_error_get_descr(result));
     }
-printf("%d\n", __LINE__);
+    DOCA_LOG_INFO("Worker [%u] send details to DNE", resources->id);
+
     /* Wait for RDMA connection details from the DNE */
     result = sock_recv_buffer(resources->remote_rdma_conn_descriptor,
                                 &resources->remote_rdma_conn_descriptor_size,
@@ -842,10 +844,18 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
 
     char *argv[] = {
         "dummy",
-        "-d", "mlx5_0",
-        "-s", "167088",
-        "-a", "128.110.219.40",
-        "-p", "10000"
+        "-d", "mlx5_2",
+        // "-s", "1024",
+        // DNE use 31930
+        "-s", "31930",
+        // the simple client use 10000
+        // "-s", "1024",
+        "-a", "10.10.1.12",
+        // DNE use 8084
+        "-p", "8084",
+        // the simple client use 10000
+        // "-p", "10000",
+        "-g", "3"
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
 
@@ -868,6 +878,13 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
         exit(1);
     }
 
+    struct sockaddr_in local_addr;
+    socklen_t len = sizeof(local_addr);
+    getsockname(cfg->sock_fd, (struct sockaddr*)&local_addr, &len);
+
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &local_addr.sin_addr, ip, sizeof(ip));
+    DOCA_LOG_INFO("Local address: %s:%d\n", ip, ntohs(local_addr.sin_port));
     DOCA_LOG_INFO("Worker [%ld] established connection with the DNE", proc_id);
 }
 
