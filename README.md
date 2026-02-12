@@ -7,14 +7,18 @@ Note: F-stack works with Intel NICs using `igb_uio` driver and Mellanox NICs usi
 
 ```bash
 git clone --recursive https://github.com/ucr-serverless/nadino-ingress.git
+git submodule update --init --recursive
 ```
 
 ## Install deps
 ```bash
 # Install byobu (optional)
 sudo apt update && sudo apt install -y byobu && byobu
+```
 
-# Install conda (optional)
+### Install conda (optional)
+
+```
 wget https://repo.anaconda.com/miniconda/Miniconda3-py39_23.3.1-0-Linux-x86_64.sh
 chmod +x Miniconda3-py39_23.3.1-0-Linux-x86_64.sh
 bash Miniconda3-py39_23.3.1-0-Linux-x86_64.sh -b -p ~/miniconda3
@@ -25,17 +29,21 @@ source $HOME/.bashrc
 # Create conda env (optional)
 conda create -n ingress python=3.10 -y
 conda activate ingress
+```
 
-# Install build dependencies (TODO: remove unnecessary deps)
+### Install build dependencies
+```
 sudo apt update && sudo apt install -y flex bison build-essential dwarves libssl-dev libelf-dev \
                     libnuma-dev pkg-config python3-pip python3-pyelftools \
                     libconfig-dev golang clang gcc-multilib uuid-dev sysstat gawk libpcre3 libpcre3-dev libglib2.0-dev
 
 pip3 install meson ninja
 pip3 install pyelftools --upgrade
+```
 
 # To get F-stack to work with Mellanox NICs, install the `mlx5_core` driver.
 # Skip this step if you get F-stack to work with Intel NICs
+```
 cd nadino-ingress/RDMA_lib/scripts/
 bash install_ofed_driver.sh
 sudo /etc/init.d/openibd restart # load the newly installed drivers
@@ -45,14 +53,24 @@ sudo reboot # Reboot node to load IP address
 ## Build DPDK and F-stack
 ```bash
 # Compile DPDK (21.11)
+cd
 cd nadino-ingress/f-stack/dpdk/
 meson setup -Denable_kmods=true build
 ninja -C build
 ninja -C build install
+# if run with normal user, the installation may get privilege error. Then run with sudo instead
+sudo ninja -C build install
+```
 
-# Set hugepage at system-wide (Option#1)
+### Set hugepage at system-wide
+
+(Option#1)
+
+```
 sudo sysctl -w vm.nr_hugepages=16384
+```
 
+```
 # Set hugepage (Option#2)
 # single-node system (Option#2) (use root)
 echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
@@ -60,14 +78,29 @@ echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
 # or NUMA (Option#2) (use root)
 echo 1024 > /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
 echo 1024 > /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages
+```
 
-# Using Hugepage with the DPDK
+### Using Hugepage with the DPDK
+```
 sudo mkdir /mnt/huge
 sudo mount -t hugetlbfs nodev /mnt/huge
+```
 
+```
 # Close ASLR; it is necessary in multiple process (use root)
+# execute this command with root
 echo 0 > /proc/sys/kernel/randomize_va_space
+```
 
+### setup PMD
+
+NOTE: for Intel NICs, you should install `igb_uio`
+NOTE: comment out `pci_whitelist` option when using Intel NICs.
+
+For Mellanox NICs, you *do not* need to install `igb_uio` or bind the NIC to DPDK explicitly.
+
+
+```
 # Install the DPDK driver (igb_uio) for Intel NICs (Not needed for Mellanox NICs)
 modprobe uio
 insmod f-stack/dpdk/build/kernel/linux/igb_uio/igb_uio.ko
@@ -77,8 +110,30 @@ insmod f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on # carrier=on is
 python dpdk-devbind.py --status
 ifconfig eth0 down
 python dpdk-devbind.py --bind=igb_uio eth0 # assuming that use 10GE NIC and eth0
+```
 
 # Compile and install F-Stack
+export FF_PATH=~/nadino-ingress/f-stack
+### Mellanox NICs
+
+When using Mellanox NICs, check the NIC's PCIe address with `python ./f-stack/dpdk/usertools/dpdk-devbind.py --status`
+
+Then change the `pci_whitelist` option in the `./conf/f-stack.conf` to the address of this device
+
+For Mellanox NICs, they are not required to be unbind from kernel.
+
+But remember to delete the IP addresses bind to it with `sudo ip addr del <ip_addr> dev <dev_name>`
+
+### f-stack config
+
+Change the `port0` configs
+
+These config are passed to the user network stack and serve as the IP config.
+
+On easy way is to follow the config of the original setting when using kernel stack.
+
+## Compile and install F-Stack
+```
 export FF_PATH=~/nadino-ingress/f-stack
 export PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig
 cd ~/nadino-ingress/f-stack/lib/
@@ -93,28 +148,41 @@ make
 ```
 
 ## Build DOCA Lib
-```bash
-cd ~/
 
-# Install DOCA packages (v2.9.1)
+### Install DOCA Lib
+
+Please refer to the original documentation.
+
+Our project is tested under DOCA 2.9.1 to 2.10
+
+```bash
+cd ~
 wget https://www.mellanox.com/downloads/DOCA/DOCA_v2.9.1/host/doca-host_2.9.1-018000-24.10-ubuntu2204_amd64.deb
 sudo dpkg -i doca-host_2.9.1-018000-24.10-ubuntu2204_amd64.deb
 sudo apt-get update
 sudo apt-get -y install doca-all
+```
 
 # Install DOCA Lib
+```
 cd ~/nadino-ingress/DOCA_lib
 meson /tmp/doca_lib
 ninja -C /tmp/doca_lib
 ```
 
 ## Build NADINO Ingress
+
 ```bash
 cd ~/nadino-ingress/
-bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
+FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 # For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
+```
 
 # NOTE 1: Add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile
+After the `.configure` step, open the `objs/Makefile` and manually change the `pdi_rdma.o` compilation command into the following
+
+*NOTE: Add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile*
+```
 objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
 	src/core/pdi_rdma.c
 	$(CC) -c $(CFLAGS) $(CORE_INCS) $(HTTP_INCS) \
@@ -128,18 +196,10 @@ objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
         "-d", "mlx5_0",
         "-s", "167088",
         "-a", "128.110.219.40",
-        "-p", "10000"
-    };
-
-# If need "-g"
-    char *argv[] = {
-        "dummy",
-        "-d", "mlx5_0",
-        "-s", "167088",
-        "-a", "128.110.219.40",
         "-p", "10000",
         "-g", "3"
     };
+
 
 # Compile NADINO Ingress
 make -j
@@ -147,7 +207,26 @@ sudo make install
 ```
 
 ## Enable HTTP-RDMA adaptor in NADINO Ingress
+Alternatively, run `python ./scripts/patch_make.py` to update the Makefile automatically.
+
+```bash
+FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig make -j
+sudo make install
+```
+
+## Change configs
+
+The f-stack related configs are located in `conf/f-stack.conf`, which will be read into `./conf/nginx.conf` and pass to NGINX.
+
+After you have changed configs in the nadino-ingress source, use `sudo make install` to synchronize the change then restart the NGINX
+
+## Enable HTTP-RDMA adaptor in nadino Ingress
 We use the NGINX location block to enable HTTP-RDMA adaptor. The command used for HTTP-RDMA adaptor is `palladium_ingress`. The command used for the regular HTTP reverse proxy is still `proxy_pass`. An example configuration of HTTP-RDMA adaptor is shown below:
+
+To enable the rdma and f-stack path, edit the `./conf/nginx.conf` and add the following content inside the existing server block.
+
+NOTE: to enable the `/rdma`, you should either use the simple server in `./microbench/` or full-fledged [naidno-network-engine](https://github.com/ucr-serverless/nadino-network-engine)
+
 ```
 http {
     ...
@@ -229,9 +308,23 @@ Network devices using kernel driver
 # This affects RPS and latency performance at low concurrency.
 ```
 
-NGINX documentation is available at http://nginx.org
+### test with simple backend
+
+```
+meson setup /tmp/rdma_server/ microbench/
+ninja -C /tmp/rdma_server/
+```
+
+run the client first with 
+
+```bash
+/tmp/rdma_server/rdma_server -d <rdma device> -n 1000 -s 1024 -a <socket_server_ip> -p <socket_server_port> -g <gid_index>
+```
+
 
 ## How to add new source file?
+
+NGINX documentation is available at http://nginx.org
 
 Create new files, include the two necessary header file, according to [nginx development guide](https://nginx.org/en/docs/dev/development_guide.html)
 
