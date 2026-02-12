@@ -25,7 +25,7 @@ kill_server:
     sudo pkill -i rdma_server
 
 server server_IP:
-    /tmp/rdma_server/rdma_server -d mlx5_2 -n 1000 -s 31930 -a {{server_IP}} -p 8084 -g 3
+    /tmp/rdma_server/rdma_server -d mlx5_2 -n 1000 -s 31920 -a {{server_IP}} -p 8084 -g 3
 
 status:
     ./f-stack/dpdk/usertools/dpdk-devbind.py --status

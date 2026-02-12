@@ -47,7 +47,7 @@ struct rdma_resources *pdin_send_resources;
 
 
 doca_error_t
-pdin_allocate_doca_mmap(const uint32_t mmap_permissions, struct rdma_resources *resources, uint32_t m_size)
+pdin_allocate_doca_mmap(const uint32_t mmap_permissions, struct rdma_resources *resources, uint64_t m_size)
 {
     doca_error_t result;
 
@@ -641,7 +641,8 @@ pdin_init_doca_rdma_client_ctx(ngx_int_t proc_id, void *cfg, ngx_cycle_t *cycle)
     uint32_t mmap_permissions = DOCA_ACCESS_FLAG_LOCAL_READ_WRITE;
     uint32_t rdma_permissions = DOCA_ACCESS_FLAG_LOCAL_READ_WRITE;
 
-    uint32_t total_memrange_size = (uint32_t) 2 * (uint32_t) config->msg_sz * (uint32_t) NUM_BUFS_PER_PDIN_WORKER_PROCESS;
+    DOCA_LOG_INFO("msg size in mempool; [%d]", config->msg_sz);
+    uint64_t total_memrange_size = (uint32_t) 2 * (uint32_t) config->msg_sz * (uint32_t) NUM_BUFS_PER_PDIN_WORKER_PROCESS;
     
     /* DOCA dev, mmap, PE, DOCA RDMA ctx */
     result = allocate_rdma_resources(config, mmap_permissions, rdma_permissions,
@@ -846,11 +847,12 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
         "dummy",
         "-d", "mlx5_2",
         // "-s", "1024",
-        // DNE use 31930
-        "-s", "31930",
+        // DNE use 31920
+        "-s", "31920",
         // the simple client use 10000
         // "-s", "1024",
         "-a", "10.10.1.12",
+        // "-a", "10.10.1.4",
         // DNE use 8084
         "-p", "8084",
         // the simple client use 10000
@@ -870,7 +872,14 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
     DOCA_LOG_INFO("DNE socket IP: %s", cfg->sock_ip);
     DOCA_LOG_INFO("DNE socket port: %d", cfg->sock_port);
     DOCA_LOG_INFO("Message size: %u", cfg->msg_sz);
+    DOCA_LOG_INFO("the input msg_sz[%d] :sizeof http_transaction [%ld]", cfg->msg_sz, sizeof(struct http_transaction));
 
+    if (cfg->msg_sz != sizeof(struct http_transaction))
+    {
+        DOCA_LOG_ERR("the input msg_sz[%d] is not equal to sizeof http_transaction [%ld]", cfg->msg_sz, sizeof(struct http_transaction));
+        cfg->msg_sz = sizeof(struct http_transaction);
+
+    }
     /* Establish control path (TCP) connection with backend DNEs to exchange RC metadata */
     cfg->sock_fd = pdin_rdma_ctrl_path_client_connect(cfg->sock_ip, (uint16_t) cfg->sock_port);
     if (cfg->sock_fd == -1) {

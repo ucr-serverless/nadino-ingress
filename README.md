@@ -135,7 +135,6 @@ On easy way is to follow the config of the original setting when using kernel st
 ## Compile and install F-Stack
 ```
 export FF_PATH=~/nadino-ingress/f-stack
->>>>>>> 50e62feb (fix readme)
 export PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig
 cd ~/nadino-ingress/f-stack/lib/
 make -j
@@ -174,7 +173,6 @@ ninja -C /tmp/doca_lib
 ## Build NADINO Ingress
 
 ```bash
-<<<<<<< HEAD
 cd ~/nadino-ingress/
 FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 # For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
@@ -198,18 +196,10 @@ objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
         "-d", "mlx5_0",
         "-s", "167088",
         "-a", "128.110.219.40",
-        "-p", "10000"
-    };
-
-# If need "-g"
-    char *argv[] = {
-        "dummy",
-        "-d", "mlx5_0",
-        "-s", "167088",
-        "-a", "128.110.219.40",
         "-p", "10000",
         "-g", "3"
     };
+
 
 # Compile NADINO Ingress
 make -j
