@@ -435,6 +435,24 @@ After the online boutique function chain [set up](https://github.com/sungyu-chan
     wrk -t{{thread}} -c{{client}} -d10s "http://10.10.1.3:80/rdma/1product?1YMWWN1N4O" -H "Connection: Close"
 ```
 
+## Trouble shooting
+
+If the NADINO-ingress silently exited after you see the line `f-stack -c1 -n4 --proc-type=primary --allow=0000:63:00.0`.
+
+It is mostly because the DPDK is not initialized properly.
+
+One can check the log file at `/usr/local/nginx_fstack/logs/error.log` for detailed reason.
+
+Because the log is accumulated across different runs, one should check the tail of the log file.
+
+If the error is `Cannot create lock on '/var/run/dpdk/rte/config'. Is another primary process running?`, that indicates another DPDK main process is running.
+
+You should use `pkill nginx` to kill the nadino-ingress and restart the ingress.
+
+If the error is `No free 2048 kB hugepages reported on node 0`, that indicates there are no huge page allocated.
+
+You should use `sudo sysctl -w vm.nr_hugepages=32768` or other appropriate page number to allocate huge page and rerun the nadino-ingress.
+
 ## How to add new source file?
 
 NGINX documentation is available at http://nginx.org
