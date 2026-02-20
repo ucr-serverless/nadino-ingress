@@ -253,16 +253,31 @@ objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
 		-o objs/src/core/pdi_rdma.o \
 		src/core/pdi_rdma.c
 
-# NOTE 2: Update hardcoded RDMA params in pdi_rdma.c
-# Go to pdin_init_rdma_config() in pdi_rdma.c
-    char *argv[] = {
-        "dummy",
-        "-d", "mlx5_0",
-        "-s", "167088",
-        "-a", "128.110.219.40",
-        "-p", "10000",
-        "-g", "3"
-    };
+# NOTE 2: Set RDMA connection parameters in conf/rdma.cfg
+RDMA parameters are now read from `conf/rdma.cfg` at runtime — **no recompilation required**.
+Open `conf/rdma.cfg` and set the values for your deployment:
+
+```ini
+# RDMA/DOCA device name — run 'doca_tools list_devices' or check
+# /sys/class/infiniband/ to find the name for your Mellanox NIC.
+device = mlx5_0
+
+# Message size in bytes — must equal sizeof(struct http_transaction).
+msg_sz = 167088
+
+# IP address of the DNE (Distributed Network Engine) backend server.
+server_ip = 128.110.219.40
+
+# TCP port on the DNE server used for the RDMA control-path handshake.
+server_port = 10000
+
+# GID index for the RDMA device (3 = RoCEv2 on most CloudLab setups).
+gid_idx = 3
+```
+
+After editing `conf/rdma.cfg`, run `sudo make install` to copy it to the installed
+configuration directory (`/usr/local/nginx_fstack/conf/`), then restart NGINX.
+Changes take effect on the next worker startup — no recompile needed.
 
 
 # Compile NADINO Ingress
@@ -280,9 +295,14 @@ sudo make install
 
 ## Change configs
 
-The f-stack related configs are located in `conf/f-stack.conf`, which will be read into `./conf/nginx.conf` and pass to NGINX.
+| Config file | Purpose |
+|---|---|
+| `conf/f-stack.conf` | DPDK/F-stack settings (port, hugepages, lcore mask) |
+| `conf/nginx.conf`   | NGINX settings (worker count, location blocks) |
+| `conf/rdma.cfg`     | RDMA connection parameters (device, IP, port, GID) — read at runtime, no recompile needed |
 
-After you have changed configs in the nadino-ingress source, use `sudo make install` to synchronize the change then restart the NGINX
+After editing any config file, run `sudo make install` to copy it to the installed
+directory (`/usr/local/nginx_fstack/conf/`), then restart NGINX.
 
 ## Enable HTTP-RDMA adaptor in nadino Ingress
 We use the NGINX location block to enable HTTP-RDMA adaptor. The command used for HTTP-RDMA adaptor is `palladium_ingress`. The command used for the regular HTTP reverse proxy is still `proxy_pass`. An example configuration of HTTP-RDMA adaptor is shown below:
