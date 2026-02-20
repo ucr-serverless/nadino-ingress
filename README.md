@@ -423,6 +423,17 @@ run the client first with
 /tmp/rdma_server/rdma_server -d <rdma device> -n 1000 -s 1024 -a <socket_server_ip> -p <socket_server_port> -g <gid_index>
 ```
 
+## test with nadino-network-engine
+
+After the online boutique function chain [set up](https://github.com/sungyu-chang/nadino-network-engine/blob/main/README.md) and network engine and ingress connected, run the following command to test different online-boutique routes
+
+```
+    wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/cart -H "Connection: Close"
+
+    wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/ -H "Connection: Close"
+
+    wrk -t{{thread}} -c{{client}} -d10s "http://10.10.1.3:80/rdma/1product?1YMWWN1N4O" -H "Connection: Close"
+```
 
 ## How to add new source file?
 
