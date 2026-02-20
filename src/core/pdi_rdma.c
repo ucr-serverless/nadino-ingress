@@ -20,6 +20,9 @@
 #include <netinet/in.h>
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -824,6 +827,68 @@ pdin_rdma_ctrl_path_client_read(int sock_fd, void *buffer, size_t len)
     return tot_read;
 }
 
+/*
+ * Path to the RDMA configuration file.
+ * 'sudo make install' copies conf/rdma.cfg to this location.
+ * Change this macro if you install NGINX to a non-default prefix.
+ */
+#define RDMA_CFG_PATH       "/usr/local/nginx_fstack/conf/rdma.cfg"
+#define RDMA_CFG_MAX_LINE   256
+#define RDMA_CFG_MAX_VALUE  128
+
+/*
+ * load_rdma_cfg_file - Parse the RDMA configuration file and populate
+ *                      string buffers for each RDMA connection parameter.
+ *
+ * The file uses a simple "key = value" format (one pair per line).
+ * Lines beginning with '#' and blank lines are ignored.
+ *
+ * Recognised keys:
+ *   device      - RDMA/DOCA device name        (passed to doca_argp as -d)
+ *   msg_sz      - message size in bytes        (passed as -s)
+ *   server_ip   - DNE server IP address        (passed as -a)
+ *   server_port - DNE server TCP port          (passed as -p)
+ *   gid_idx     - RDMA GID index               (passed as -g)
+ *
+ * Returns 0 on success, -1 if the file cannot be opened.
+ */
+static int
+load_rdma_cfg_file(const char *path,
+                   char *device,   size_t device_sz,
+                   char *msg_sz,   size_t msg_sz_sz,
+                   char *srv_ip,   size_t srv_ip_sz,
+                   char *srv_port, size_t srv_port_sz,
+                   char *gid_idx,  size_t gid_idx_sz)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "rdma config: cannot open '%s': %s\n", path, strerror(errno));
+        return -1;
+    }
+
+    char line[RDMA_CFG_MAX_LINE];
+    while (fgets(line, sizeof(line), f)) {
+        /* Skip comments and blank lines */
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0')
+            continue;
+
+        char key[RDMA_CFG_MAX_VALUE], val[RDMA_CFG_MAX_VALUE];
+        if (sscanf(line, " %127[^= \t] = %127s", key, val) != 2)
+            continue;
+
+        if      (strcmp(key, "device")      == 0) snprintf(device,   device_sz,   "%s", val);
+        else if (strcmp(key, "msg_sz")      == 0) snprintf(msg_sz,   msg_sz_sz,   "%s", val);
+        else if (strcmp(key, "server_ip")   == 0) snprintf(srv_ip,   srv_ip_sz,   "%s", val);
+        else if (strcmp(key, "server_port") == 0) snprintf(srv_port, srv_port_sz, "%s", val);
+        else if (strcmp(key, "gid_idx")     == 0) snprintf(gid_idx,  gid_idx_sz,  "%s", val);
+    }
+
+    fclose(f);
+    return 0;
+}
+
 void
 pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
 {
@@ -843,21 +908,34 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
         doca_argp_destroy();
     }
 
+    /* Load RDMA connection parameters from the config file at runtime.
+     * Fall back to the built-in defaults if the file cannot be read.
+     * Edit conf/rdma.cfg (then run 'sudo make install') to change these
+     * values without recompiling. */
+    char cfg_device[RDMA_CFG_MAX_VALUE]   = "mlx5_2";
+    char cfg_msg_sz[RDMA_CFG_MAX_VALUE]   = "31920";
+    char cfg_srv_ip[RDMA_CFG_MAX_VALUE]   = "10.10.1.4";
+    char cfg_srv_port[RDMA_CFG_MAX_VALUE] = "8084";
+    char cfg_gid_idx[RDMA_CFG_MAX_VALUE]  = "3";
+
+    if (load_rdma_cfg_file(RDMA_CFG_PATH,
+                           cfg_device,   sizeof(cfg_device),
+                           cfg_msg_sz,   sizeof(cfg_msg_sz),
+                           cfg_srv_ip,   sizeof(cfg_srv_ip),
+                           cfg_srv_port, sizeof(cfg_srv_port),
+                           cfg_gid_idx,  sizeof(cfg_gid_idx)) != 0) {
+        DOCA_LOG_WARN("Worker [%ld]: '%s' not found — using built-in RDMA defaults",
+                      proc_id, RDMA_CFG_PATH);
+    }
+
+    /* Build the argument vector for doca_argp from the loaded config values. */
     char *argv[] = {
         "dummy",
-        "-d", "mlx5_2",
-        // "-s", "1024",
-        // DNE use 31920
-        "-s", "31920",
-        // the simple client use 10000
-        // "-s", "1024",
-        "-a", "10.10.1.12",
-        // "-a", "10.10.1.4",
-        // DNE use 8084
-        "-p", "8084",
-        // the simple client use 10000
-        // "-p", "10000",
-        "-g", "3"
+        "-d", cfg_device,
+        "-s", cfg_msg_sz,
+        "-a", cfg_srv_ip,
+        "-p", cfg_srv_port,
+        "-g", cfg_gid_idx
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
 

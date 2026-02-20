@@ -1,5 +1,8 @@
 # Justfile
 # a just file for development only
+init:
+    git submodule update --init --recursive
+
 build:
     FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig make -j
     meson setup /tmp/rdma_server/ microbench/
@@ -29,3 +32,15 @@ server server_IP:
 
 status:
     ./f-stack/dpdk/usertools/dpdk-devbind.py --status
+
+dummy_server:
+    wrk -t1 -c50 -d10s http://10.10.1.3:80/rdma/ -H "Connection: Close"
+
+cart thread client:
+    wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/cart -H "Connection: Close"
+
+default thread client:
+    wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/ -H "Connection: Close"
+
+product thread client:
+    wrk -t{{thread}} -c{{client}} -d10s "http://10.10.1.3:80/rdma/1product?1YMWWN1N4O" -H "Connection: Close"
