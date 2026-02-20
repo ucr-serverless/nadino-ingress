@@ -1,5 +1,8 @@
 # Justfile
 # a just file for development only
+init:
+    git submodule update --init --recursive
+
 build:
     FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig make -j
     meson setup /tmp/rdma_server/ microbench/

@@ -851,8 +851,8 @@ pdin_init_rdma_config(struct rdma_config *cfg, ngx_int_t proc_id)
         "-s", "31920",
         // the simple client use 10000
         // "-s", "1024",
-        "-a", "10.10.1.12",
-        // "-a", "10.10.1.4",
+        // "-a", "10.10.1.12",
+        "-a", "10.10.1.4",
         // DNE use 8084
         "-p", "8084",
         // the simple client use 10000
