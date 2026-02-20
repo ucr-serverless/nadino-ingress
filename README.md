@@ -41,20 +41,34 @@ pip3 install meson ninja
 pip3 install pyelftools --upgrade
 ```
 
-# To get F-stack to work with Mellanox NICs, install the `mlx5_core` driver.
-# Skip this step if you get F-stack to work with Intel NICs
-```
-cd nadino-ingress/RDMA_lib/scripts/
+### Install OFED driver for Mellanox NICs (skip for Intel NICs)
+
+Mellanox NICs use the `mlx5` Poll Mode Driver (PMD) built into DPDK, which operates on top of
+the standard `mlx5_core` kernel driver — no rebinding to `igb_uio` is required. However, DPDK's
+mlx5 PMD needs the OFED (OpenFabrics Enterprise Distribution) or `rdma-core` user-space libraries
+to be present **before** DPDK is compiled. Install them now:
+
+```bash
+cd ~/nadino-ingress/RDMA_lib/scripts/
 bash install_ofed_driver.sh
-sudo /etc/init.d/openibd restart # load the newly installed drivers
-sudo reboot # Reboot node to load IP address
+sudo /etc/init.d/openibd restart   # load the newly installed drivers
+sudo reboot                        # reboot so mlx5_core reloads cleanly and IP addrs are restored
+```
+
+After the reboot, verify the driver is loaded:
+```bash
+lsmod | grep mlx5
+# Expected output includes: mlx5_core, mlx5_ib (or similar)
 ```
 
 ## Build DPDK and F-stack
+
+> **Mellanox users**: OFED must be installed before this step so that the mlx5 PMD is compiled
+> into DPDK automatically. If you install OFED after building DPDK, you must rebuild DPDK.
+
 ```bash
 # Compile DPDK (21.11)
-cd
-cd nadino-ingress/f-stack/dpdk/
+cd ~/nadino-ingress/f-stack/dpdk/
 meson setup -Denable_kmods=true build
 ninja -C build
 ninja -C build install
@@ -92,45 +106,95 @@ sudo mount -t hugetlbfs nodev /mnt/huge
 echo 0 > /proc/sys/kernel/randomize_va_space
 ```
 
-### setup PMD
+### Setup PMD
 
-NOTE: for Intel NICs, you should install `igb_uio`
-NOTE: comment out `pci_whitelist` option when using Intel NICs.
+**Intel NICs** — bind to `igb_uio` and comment out `pci_whitelist` in `f-stack.conf`:
 
-For Mellanox NICs, you *do not* need to install `igb_uio` or bind the NIC to DPDK explicitly.
-
-
-```
-# Install the DPDK driver (igb_uio) for Intel NICs (Not needed for Mellanox NICs)
+```bash
+# Install and load the igb_uio driver
 modprobe uio
 insmod f-stack/dpdk/build/kernel/linux/igb_uio/igb_uio.ko
-insmod f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on # carrier=on is necessary, otherwise need to be up `veth0` via `echo 1 > /sys/class/net/veth0/carrier`
+insmod f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on
 
-# Bind NICs to DPDK (only for Intel NICs)
-python dpdk-devbind.py --status
+# Bind the NIC to DPDK
+python f-stack/dpdk/usertools/dpdk-devbind.py --status
 ifconfig eth0 down
-python dpdk-devbind.py --bind=igb_uio eth0 # assuming that use 10GE NIC and eth0
+python f-stack/dpdk/usertools/dpdk-devbind.py --bind=igb_uio eth0
 ```
 
-# Compile and install F-Stack
-export FF_PATH=~/nadino-ingress/f-stack
-### Mellanox NICs
+**Mellanox NICs** — no driver rebinding is needed. DPDK's built-in mlx5 PMD works directly on
+top of the `mlx5_core` kernel driver. Instead, you identify the NIC to DPDK by its PCIe address
+using the `pci_whitelist` option in `conf/f-stack.conf`.
 
-When using Mellanox NICs, check the NIC's PCIe address with `python ./f-stack/dpdk/usertools/dpdk-devbind.py --status`
+#### Step 1 — Find the PCIe address of your Mellanox NIC
 
-Then change the `pci_whitelist` option in the `./conf/f-stack.conf` to the address of this device
+```bash
+python ~/nadino-ingress/f-stack/dpdk/usertools/dpdk-devbind.py --status
+```
 
-For Mellanox NICs, they are not required to be unbind from kernel.
+Example output:
+```
+Network devices using kernel driver
+=====================================
+0000:01:00.0 'MT27800 Family [ConnectX-5]' if=eno33np0  drv=mlx5_core unused=vfio-pci *Active*
+0000:01:00.1 'MT27800 Family [ConnectX-5]' if=eno34np1  drv=mlx5_core unused=vfio-pci
+0000:63:00.0 'MT27800 Family [ConnectX-5]' if=enp99s0f0 drv=mlx5_core unused=vfio-pci *Active*
+0000:63:00.1 'MT27800 Family [ConnectX-5]' if=enp99s0f1 drv=mlx5_core unused=vfio-pci
+```
 
-But remember to delete the IP addresses bind to it with `sudo ip addr del <ip_addr> dev <dev_name>`
+Pick the interface you want F-stack to own (e.g. `enp99s0f0` at `0000:63:00.0`).
 
-### f-stack config
+#### Step 2 — Set `pci_whitelist` in `conf/f-stack.conf`
 
-Change the `port0` configs
+```ini
+[dpdk]
+# Tell DPDK which Mellanox NIC to use (PCIe address from dpdk-devbind.py)
+pci_whitelist=0000:63:00.0
+```
 
-These config are passed to the user network stack and serve as the IP config.
+When only one device is whitelisted, DPDK assigns it **port index 0** internally, regardless of
+the order shown by `dpdk-devbind.py`. Therefore set `port_list=0` and configure `[port0]` (see
+the f-stack config section below).
 
-On easy way is to follow the config of the original setting when using kernel stack.
+If you whitelist multiple devices (e.g. for bonding), they are assigned port indices 0, 1, …
+in the order they appear in `pci_whitelist`.
+
+> **Intel NICs**: comment out or remove the `pci_whitelist` line — DPDK will discover all
+> `igb_uio`-bound devices automatically and port indices follow `dpdk-devbind.py` order.
+
+#### Step 3 — Remove the kernel IP address from the NIC
+
+DPDK takes exclusive ownership of the NIC's packet path. Remove the IP address that the kernel
+assigned so there is no conflict:
+
+```bash
+# Replace <ip_addr> and <dev_name> with your values (e.g. 10.10.1.3 and enp99s0f0)
+sudo ip addr del <ip_addr>/24 dev <dev_name>
+
+# Verify the address is gone
+ip addr show <dev_name>
+```
+
+The interface stays up and `mlx5_core` remains loaded — only the IP is removed.
+
+### f-stack config (`conf/f-stack.conf`)
+
+The `[port0]` section defines the IP configuration that the F-stack (FreeBSD) network stack
+presents to NGINX. Set it to the values the NIC had under the kernel:
+
+```ini
+port_list=0          # must match the DPDK port index (0 when one device is whitelisted)
+
+[port0]
+addr=10.10.1.3       # IP address previously on the NIC
+netmask=255.255.255.0
+broadcast=10.10.1.255
+gateway=10.10.1.1
+```
+
+`lcore_mask` controls which CPU cores DPDK polls on. It must match the number of
+`worker_processes` in `nginx.conf` (one bit per worker). For example, `lcore_mask=1` uses only
+core 0 — appropriate for a single worker process.
 
 ## Compile and install F-Stack
 ```
@@ -251,62 +315,80 @@ http {
 ```
 
 ## Test NADINO Ingress
+
+Before starting, verify the installed f-stack config matches your NIC setup:
+```bash
+# The installed config is a copy of conf/f-stack.conf placed by `sudo make install`
+# Edit directly after install, or edit the source and re-run `sudo make install`
+sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
+```
+
+### Binding a NIC to F-stack (`conf/f-stack.conf`)
+
+This is a summary of how port assignments work. See the "Setup PMD" section above for the full
+step-by-step instructions.
+
+**Mellanox NICs** (`mlx5_core` driver — no rebinding needed):
+
+1. Find your NIC's PCIe address:
+   ```bash
+   python ~/nadino-ingress/f-stack/dpdk/usertools/dpdk-devbind.py --status
+   ```
+   Example output:
+   ```
+   Network devices using kernel driver
+   =====================================
+   0000:01:00.0 'MT27800 Family [ConnectX-5]' if=eno33np0    drv=mlx5_core *Active*
+   0000:01:00.1 'MT27800 Family [ConnectX-5]' if=eno34np1    drv=mlx5_core
+   0000:41:00.0 'MT27800 Family [ConnectX-5]' if=enp65s0f0   drv=mlx5_core *Active*
+   0000:41:00.1 'MT27800 Family [ConnectX-5]' if=enp65s0f1   drv=mlx5_core
+   ```
+
+2. Set `pci_whitelist` in `f-stack.conf` to the PCIe address of your chosen NIC. DPDK assigns
+   the **first (and only) whitelisted device port index 0**, regardless of its position in the
+   `dpdk-devbind.py` output. Use `port_list=0` and `[port0]`:
+   ```ini
+   # Example: use enp65s0f0 (PCIe 0000:41:00.0)
+   pci_whitelist=0000:41:00.0
+
+   port_list=0
+
+   [port0]
+   addr=10.10.1.3        # IP formerly assigned to enp65s0f0 under the kernel
+   netmask=255.255.255.0
+   broadcast=10.10.1.255
+   gateway=10.10.1.1
+   ```
+
+3. Remove the IP address from the NIC so the kernel does not conflict with DPDK:
+   ```bash
+   sudo ip addr del 10.10.1.3/24 dev enp65s0f0
+   ```
+
+**Intel NICs** (`igb_uio` driver — must be rebound to DPDK first): port indices follow
+`dpdk-devbind.py` order after rebinding. Comment out `pci_whitelist` and set `port_list` to the
+port's position in that list.
+
 ```bash
 # Run NGINX not as a daemon
 sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
-
-# Number of worker processes: 
-# Default config creates only one worker process
-# If you need more worker processes, please change both "lcore_mask" in f-stack.conf and "worker_processes" in nginx.conf
-# or use HPA to adjust number of worker processes based on load level
-
-# Print logs of NGINX
-sudo cat /var/log/syslog | grep "f-stack"
-
-# Print NGINX Runtime Logs
-tail -f /usr/local/nginx_fstack/logs/error.log
-
-# Modify F-stack configuration
-sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
-
-# Bind NIC to F-stack
-# You need to properly change "port_list" and "Port config section" in f-stack.conf to bind NIC to F-stack.
-# The first is to get the index of port used for F-stack. I will use Cloudlab node as an example to explain.
-# You will need to use "nadino-ingress/f-stack/dpdk/usertools/dpdk-devbind.py" to get the port index
-cd ~/nadino-ingress/f-stack/dpdk/usertools/
-python dpdk-devbind.py --status
-# You will see the output as below:
-Network devices using kernel driver
-===================================
-0000:01:00.0 'MT27800 Family [ConnectX-5] 1017' if=eno33np0 drv=mlx5_core unused=vfio-pci *Active*
-0000:01:00.1 'MT27800 Family [ConnectX-5] 1017' if=eno34np1 drv=mlx5_core unused=vfio-pci
-0000:41:00.0 'MT27800 Family [ConnectX-5] 1017' if=enp65s0f0np0 drv=mlx5_core unused=vfio-pci *Active*
-0000:41:00.1 'MT27800 Family [ConnectX-5] 1017' if=enp65s0f1np1 drv=mlx5_core unused=vfio-pci
-
-# The port index follows the order in the output, starting from 0
-# If I want to bind eno33np0 to F-stack, the port index will be used in f-stack.conf is 0
-# If I want to bind enp65s0f0np0 to F-stack, the port index will be used in f-stack.conf is 2
-
-# Next is to update "port_list" and "Port config section" in f-stack.conf
-# If I choose enp65s0f0np0 (the port index is 2), I need to specify port_list=2 in Line#59 in f-stack.conf
-# I also need to change the port config section as below, replace the default [port0] with [port2],
-# and update "addr", "broadcast", "gateway" accordingly
-    ...
-    port_list=2
-    ...
-    # Port config section
-    # Correspond to dpdk.port_list's index: port0, port1...
-    [port2]
-    addr=10.10.1.1
-    netmask=255.255.255.0
-    broadcast=10.10.1.255
-    gateway=10.10.1.1
-    ...
-
-# Important Note of f-stack.conf:
-# F-stack has 100us TX packet delay time (pkt_tx_delay) while send less than 32 pkts.
-# This affects RPS and latency performance at low concurrency.
 ```
+
+**Worker process scaling**: by default only one worker process is created. To add more, set
+`worker_processes` in `nginx.conf` **and** update `lcore_mask` in `f-stack.conf` to a bitmask
+with one bit per worker (e.g. `lcore_mask=3` for two workers on cores 0 and 1).
+
+```bash
+# Print F-stack startup messages in syslog
+sudo grep "f-stack" /var/log/syslog
+
+# Stream NGINX runtime logs
+tail -f /usr/local/nginx_fstack/logs/error.log
+```
+
+> **Note**: F-stack applies a 100 µs TX packet delay (`pkt_tx_delay`) when fewer than 32 packets
+> are queued. This reduces RPS and increases latency at low concurrency. Set `pkt_tx_delay=0` in
+> `f-stack.conf` to disable it if you need minimum latency.
 
 ### test with simple backend
 
