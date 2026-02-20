@@ -263,7 +263,7 @@ Open `conf/rdma.cfg` and set the values for your deployment:
 device = mlx5_0
 
 # Message size in bytes — must equal sizeof(struct http_transaction).
-msg_sz = 167088
+msg_sz = 31920
 
 # IP address of the DNE (Distributed Network Engine) backend server.
 server_ip = 128.110.219.40
