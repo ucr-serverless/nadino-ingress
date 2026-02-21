@@ -4,7 +4,17 @@
 
 Existing build has been tested on Ubuntu 22.04 with kernel 5.15.
 
+NADINO requires two NICs to work properly; one NIC must be NVIDIA/Mellanox NIC to support RDMA traffic.
+
+Another NIC will work with DPDK for normal HTTP traffic.
+
+Later we will refer to them as RDMA NIC and DPDK NIC respectively.
+
 Note: F-stack works with Intel NICs using `igb_uio` driver and Mellanox NICs using `mlx5_core` driver.
+
+The configuration file shipped with the NADINO is used on cloudlab [`r7525`](https://docs.cloudlab.us/hardware.html) nodes.
+
+In particular, you should create the experiment with our customized [network profile](https://www.cloudlab.us/p/KKProjects/dpu-same-lan).
 
 ## Getting Started
 
@@ -48,9 +58,11 @@ pip3 install meson ninja
 pip3 install pyelftools --upgrade
 ```
 
-### 2. Install OFED Driver (Mellanox NICs only)
+### 2. Install DOCA (RDMA NIC driver)
 
 On the host, install the DOCA-host package, which will install RDMA driver (mlx5) and related softwares.
+
+If your DPDK NIC happens to be a Mellanox one, which is the case for r7525 nodes on cloudlab, you can do not to setup `igb_uio`.
 
 ```bash
 wget https://www.mellanox.com/downloads/DOCA/DOCA_v2.10.0/host/doca-host_2.10.0-093000-25.01-ubuntu2204_amd64.deb
@@ -73,16 +85,15 @@ lsmod | grep mlx5
 
 ### 3. Build DPDK and F-stack
 
-> **Mellanox users**: OFED must be installed before this step so that the mlx5 PMD is compiled
-> into DPDK automatically. If you install OFED after building DPDK, you must rebuild DPDK.
+> **Mellanox users**: DOCA-host must be installed before this step so that the mlx5 PMD is compiled
+> into DPDK automatically. If you install DOCA-host after building DPDK, you must rebuild DPDK.
+
+Compile DPDK (21.11)
 
 ```bash
-# Compile DPDK (21.11)
 cd ~/nadino-ingress/f-stack/dpdk/
 meson setup -Denable_kmods=true build
 ninja -C build
-ninja -C build install
-# if run with normal user, the installation may get privilege error. Then run with sudo instead
 sudo ninja -C build install
 ```
 
@@ -117,7 +128,9 @@ echo 0 > /proc/sys/kernel/randomize_va_space
 
 ### 5. Setup PMD (NIC Driver Binding)
 
+
 #### Intel NICs — bind to `igb_uio`
+*NOTE*: this step is only required if you DPDK NIC is a intel one.
 
 ```bash
 # Install and load the igb_uio driver
@@ -359,6 +372,8 @@ tail -f /usr/local/nginx_fstack/logs/error.log
 
 ### Test with Simple Backend
 
+The simple backend is located on the same node and offer a local test.
+
 Build the microbench RDMA server (if not already built):
 
 ```bash
@@ -369,20 +384,30 @@ ninja -C /tmp/rdma_server/
 Run the RDMA server:
 
 ```bash
-/tmp/rdma_server/rdma_server -d <rdma device> -n 1000 -s 1024 -a <socket_server_ip> -p <socket_server_port> -g <gid_index>
+/tmp/rdma_server/rdma_server -d <rdma device> -n 1000 -s 31920 -a <socket_server_ip> -p <socket_server_port> -g <gid_index>
 ```
+
+Then change the `rdma.cfg`; Change the IP address to the <socket_server_ip>`
+
+Run the nadino-ingress:
+
+```bash
+sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
+```
+
 
 ### Test with nadino-network-engine
 
-After the online boutique function chain [set up](https://github.com/sungyu-chang/nadino-network-engine/blob/main/README.md)
+After the online boutique function chain [set up](https://github.com/ucr-serverless/nadino-network-engine/blob/main/README.md)
 and network engine and ingress connected, run the following commands to test different online-boutique routes:
 
+*NOTE*: 
 ```bash
-wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/cart -H "Connection: Close"
+wrk -t1 -c50 -d10s http://10.10.1.3:80/rdma/1/cart -H "Connection: Close"
 
-wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/ -H "Connection: Close"
+wrk -t1 -c50 -d10s http://10.10.1.3:80/rdma/1/ -H "Connection: Close"
 
-wrk -t{{thread}} -c{{client}} -d10s "http://10.10.1.3:80/rdma/1product?1YMWWN1N4O" -H "Connection: Close"
+wrk -t1 -c50 -d10s "http://10.10.1.3:80/rdma/1product?1YMWWN1N4O" -H "Connection: Close"
 ```
 
 ## Troubleshooting
