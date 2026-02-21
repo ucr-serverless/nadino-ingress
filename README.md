@@ -43,19 +43,22 @@ pip3 install pyelftools --upgrade
 
 ### Install OFED driver for Mellanox NICs (skip for Intel NICs)
 
+On the host, install the DOCA-host package, which will install RDMA driver (mlx5) and related softwares.
+
+```bash
+wget https://www.mellanox.com/downloads/DOCA/DOCA_v2.10.0/host/doca-host_2.10.0-093000-25.01-ubuntu2204_amd64.deb
+sudo dpkg -i doca-host_2.10.0-093000-25.01-ubuntu2204_amd64.deb
+sudo apt-get update
+sudo apt-get -y install doca-all
+```
+
 Mellanox NICs use the `mlx5` Poll Mode Driver (PMD) built into DPDK, which operates on top of
 the standard `mlx5_core` kernel driver — no rebinding to `igb_uio` is required. However, DPDK's
 mlx5 PMD needs the OFED (OpenFabrics Enterprise Distribution) or `rdma-core` user-space libraries
 to be present **before** DPDK is compiled. Install them now:
 
-```bash
-cd ~/nadino-ingress/RDMA_lib/scripts/
-bash install_ofed_driver.sh
-sudo /etc/init.d/openibd restart   # load the newly installed drivers
-sudo reboot                        # reboot so mlx5_core reloads cleanly and IP addrs are restored
-```
+Verify the driver is loaded:
 
-After the reboot, verify the driver is loaded:
 ```bash
 lsmod | grep mlx5
 # Expected output includes: mlx5_core, mlx5_ib (or similar)
@@ -196,16 +199,10 @@ gateway=10.10.1.1
 `worker_processes` in `nginx.conf` (one bit per worker). For example, `lcore_mask=1` uses only
 core 0 — appropriate for a single worker process.
 
-## Compile and install F-Stack
-```
-export FF_PATH=~/nadino-ingress/f-stack
-export PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig
-cd ~/nadino-ingress/f-stack/lib/
-make -j
-sudo make install
-```
+*NOTE*: if your nadino direction is not under home directory, change the FF_PATH accordingly`
 
 ## Build RDMA Lib
+
 ```bash
 cd ~/nadino-ingress/RDMA_lib
 make
@@ -213,22 +210,9 @@ make
 
 ## Build DOCA Lib
 
-### Install DOCA Lib
-
-Please refer to the original documentation.
-
 Our project is tested under DOCA 2.9.1 to 2.10
 
 ```bash
-cd ~
-wget https://www.mellanox.com/downloads/DOCA/DOCA_v2.9.1/host/doca-host_2.9.1-018000-24.10-ubuntu2204_amd64.deb
-sudo dpkg -i doca-host_2.9.1-018000-24.10-ubuntu2204_amd64.deb
-sudo apt-get update
-sudo apt-get -y install doca-all
-```
-
-# Install DOCA Lib
-```
 cd ~/nadino-ingress/DOCA_lib
 meson /tmp/doca_lib
 ninja -C /tmp/doca_lib
@@ -239,22 +223,23 @@ ninja -C /tmp/doca_lib
 ```bash
 cd ~/nadino-ingress/
 FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
-# For debugging: ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug
+python ./scripts/patch_make.py
+FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig make -j
+sudo make install
+meson setup /tmp/rdma_server/ microbench/
+ninja -C /tmp/rdma_server/
 ```
 
-# NOTE 1: Add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile
-After the `.configure` step, open the `objs/Makefile` and manually change the `pdi_rdma.o` compilation command into the following
+*NOTE*: For debugging: `./configure --prefix=/usr/local/nginx_fstack --with-ff_module --with-debug`
 
-*NOTE: Add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile*
-```
-objs/src/core/pdi_rdma.o:	$(CORE_DEPS) $(HTTP_DEPS) \
-	src/core/pdi_rdma.c
-	$(CC) -c $(CFLAGS) $(CORE_INCS) $(HTTP_INCS) \
-		-o objs/src/core/pdi_rdma.o \
-		src/core/pdi_rdma.c
 
-# NOTE 2: Set RDMA connection parameters in conf/rdma.cfg
+*NOTE*: `./scripts/patch_make.py` add HTTP_DEPS and HTTP_INCS to pdi_rdma in objs/Makefile*
+
+### setup RDMA parameters
+
+*NOTE*: Set RDMA connection parameters in conf/rdma.cfg
 RDMA parameters are now read from `conf/rdma.cfg` at runtime — **no recompilation required**.
+
 Open `conf/rdma.cfg` and set the values for your deployment:
 
 ```ini
@@ -277,21 +262,7 @@ gid_idx = 3
 
 After editing `conf/rdma.cfg`, run `sudo make install` to copy it to the installed
 configuration directory (`/usr/local/nginx_fstack/conf/`), then restart NGINX.
-Changes take effect on the next worker startup — no recompile needed.
 
-
-# Compile NADINO Ingress
-make -j
-sudo make install
-```
-
-## Enable HTTP-RDMA adaptor in NADINO Ingress
-Alternatively, run `python ./scripts/patch_make.py` to update the Makefile automatically.
-
-```bash
-FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig make -j
-sudo make install
-```
 
 ## Change configs
 
@@ -304,13 +275,14 @@ sudo make install
 After editing any config file, run `sudo make install` to copy it to the installed
 directory (`/usr/local/nginx_fstack/conf/`), then restart NGINX.
 
-## Enable HTTP-RDMA adaptor in nadino Ingress
+### Enable HTTP-RDMA adaptor in nadino Ingress
 We use the NGINX location block to enable HTTP-RDMA adaptor. The command used for HTTP-RDMA adaptor is `palladium_ingress`. The command used for the regular HTTP reverse proxy is still `proxy_pass`. An example configuration of HTTP-RDMA adaptor is shown below:
 
 To enable the rdma and f-stack path, edit the `./conf/nginx.conf` and add the following content inside the existing server block.
 
-NOTE: to enable the `/rdma`, you should either use the simple server in `./microbench/` or full-fledged [naidno-network-engine](https://github.com/ucr-serverless/nadino-network-engine)
+*NOTE*: to enable the `/rdma`, you should either use the simple server in `./microbench/` or full-fledged [naidno-network-engine](https://github.com/ucr-serverless/nadino-network-engine)
 
+*NOTE*: The config has been changed for you already
 ```
 http {
     ...
@@ -337,12 +309,36 @@ http {
 ## Test NADINO Ingress
 
 Before starting, verify the installed f-stack config matches your NIC setup:
-```bash
-# The installed config is a copy of conf/f-stack.conf placed by `sudo make install`
-# Edit directly after install, or edit the source and re-run `sudo make install`
-sudo vim /usr/local/nginx_fstack/conf/f-stack.conf
+
+*NOTE*: The installed config is a copy of conf/f-stack.conf placed by `sudo make install`
+
+*NOTE*: Edit directly after install, or edit the source and re-run `sudo make install`
+`sudo vim /usr/local/nginx_fstack/conf/f-stack.conf`
+
+### test with simple backend
+
+```
+meson setup /tmp/rdma_server/ microbench/
+ninja -C /tmp/rdma_server/
 ```
 
+run the client first with 
+
+```bash
+/tmp/rdma_server/rdma_server -d <rdma device> -n 1000 -s 1024 -a <socket_server_ip> -p <socket_server_port> -g <gid_index>
+```
+
+## test with nadino-network-engine
+
+After the online boutique function chain [set up](https://github.com/sungyu-chang/nadino-network-engine/blob/main/README.md) and network engine and ingress connected, run the following command to test different online-boutique routes
+
+```
+    wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/cart -H "Connection: Close"
+
+    wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/ -H "Connection: Close"
+
+    wrk -t{{thread}} -c{{client}} -d10s "http://10.10.1.3:80/rdma/1product?1YMWWN1N4O" -H "Connection: Close"
+```
 ### Binding a NIC to F-stack (`conf/f-stack.conf`)
 
 This is a summary of how port assignments work. See the "Setup PMD" section above for the full
@@ -390,7 +386,7 @@ step-by-step instructions.
 port's position in that list.
 
 ```bash
-# Run NGINX not as a daemon
+## Run NGINX not as a daemon
 sudo /usr/local/nginx_fstack/sbin/nginx -g "daemon off;"
 ```
 
@@ -410,30 +406,6 @@ tail -f /usr/local/nginx_fstack/logs/error.log
 > are queued. This reduces RPS and increases latency at low concurrency. Set `pkt_tx_delay=0` in
 > `f-stack.conf` to disable it if you need minimum latency.
 
-### test with simple backend
-
-```
-meson setup /tmp/rdma_server/ microbench/
-ninja -C /tmp/rdma_server/
-```
-
-run the client first with 
-
-```bash
-/tmp/rdma_server/rdma_server -d <rdma device> -n 1000 -s 1024 -a <socket_server_ip> -p <socket_server_port> -g <gid_index>
-```
-
-## test with nadino-network-engine
-
-After the online boutique function chain [set up](https://github.com/sungyu-chang/nadino-network-engine/blob/main/README.md) and network engine and ingress connected, run the following command to test different online-boutique routes
-
-```
-    wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/cart -H "Connection: Close"
-
-    wrk -t{{thread}} -c{{client}} -d10s http://10.10.1.3:80/rdma/1/ -H "Connection: Close"
-
-    wrk -t{{thread}} -c{{client}} -d10s "http://10.10.1.3:80/rdma/1product?1YMWWN1N4O" -H "Connection: Close"
-```
 
 ## Trouble shooting
 
