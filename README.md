@@ -238,6 +238,8 @@ sudo make install
 
 ### Build NADINO Ingress
 
+*NOTE: make sure your are under the root directory of nadino-ingress.
+Then execute the following commands*
 ```bash
 FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 python ./scripts/patch_make.py
