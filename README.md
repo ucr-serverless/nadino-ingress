@@ -84,19 +84,6 @@ lsmod | grep mlx5
 # Expected output includes: mlx5_core, mlx5_ib (or similar)
 ```
 
-### 3. Build DPDK and F-stack
-
-> **Mellanox users**: DOCA-host must be installed before this step so that the mlx5 PMD is compiled
-> into DPDK automatically. If you install DOCA-host after building DPDK, you must rebuild DPDK.
-
-Compile DPDK (21.11)
-
-```bash
-cd ~/nadino-ingress/f-stack/dpdk/
-meson setup -Denable_kmods=true build
-ninja -C build
-sudo ninja -C build install
-```
 
 ### 4. Configure Hugepages
 
@@ -219,6 +206,34 @@ Our project is tested under DOCA 2.9.1 to 2.10.
 cd ./DOCA_lib
 meson /tmp/doca_lib
 ninja -C /tmp/doca_lib
+```
+
+If you encounter build error for DOCA_lib, try remove the existing build at `/tmp/doca_lib` with `sudo rm -rf /tmp/doca_lib` and try again
+
+### Build DPDK and F-stack
+
+> **Mellanox users**: DOCA-host must be installed before this step so that the mlx5 PMD is compiled
+> into DPDK automatically. If you install DOCA-host after building DPDK, you must rebuild DPDK.
+
+Compile DPDK (21.11)
+
+```bash
+cd ./f-stack/dpdk/
+meson setup -Denable_kmods=true build
+ninja -C build
+sudo ninja -C build install
+```
+
+## Compile and install F-Stack
+
+We assume your nadino-ingress is located under the root, if it is not, please change the `FF_PATH` accordingly.
+
+```
+export FF_PATH=~/nadino-ingress/f-stack
+export PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig
+cd ~/nadino-ingress/f-stack/lib/
+make -j
+sudo make install
 ```
 
 ### Build NADINO Ingress
