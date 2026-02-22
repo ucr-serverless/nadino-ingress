@@ -20,6 +20,7 @@ In particular, you should create the experiment with our customized [network pro
 
 ```bash
 git clone --recursive https://github.com/ucr-serverless/nadino-ingress.git
+cd nadino-ingress
 git submodule update --init --recursive
 ```
 
@@ -202,10 +203,11 @@ The interface stays up and `mlx5_core` remains loaded — only the IP is removed
 
 ## Build
 
+We assume your pwd is under the root of nadino-ingress
 ### Build RDMA Lib
 
 ```bash
-cd ~/nadino-ingress/RDMA_lib
+cd ./RDMA_lib
 make
 ```
 
@@ -214,7 +216,7 @@ make
 Our project is tested under DOCA 2.9.1 to 2.10.
 
 ```bash
-cd ~/nadino-ingress/DOCA_lib
+cd ./DOCA_lib
 meson /tmp/doca_lib
 ninja -C /tmp/doca_lib
 ```
@@ -222,7 +224,6 @@ ninja -C /tmp/doca_lib
 ### Build NADINO Ingress
 
 ```bash
-cd ~/nadino-ingress/
 FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig ./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 python ./scripts/patch_make.py
 FF_PATH=~/nadino-ingress/f-stack PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig make -j
